@@ -1,0 +1,116 @@
+[
+  {
+    "id": "bthome-tab",
+    "type": "tab",
+    "label": "BTHome → Victron",
+    "disabled": false,
+    "info": "Generic unencrypted BTHome v2 BLE sensor bridge for Venus OS."
+  },
+  {
+    "id": "bthome-inject",
+    "type": "inject",
+    "z": "bthome-tab",
+    "name": "Scan every 30 s",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "30",
+    "once": true,
+    "onceDelay": "2",
+    "payload": "",
+    "payloadType": "date",
+    "x": 140,
+    "y": 120,
+    "wires": [
+      [
+        "bthome-scan"
+      ]
+    ]
+  },
+  {
+    "id": "bthome-scan",
+    "type": "gx-ble-scan",
+    "z": "bthome-tab",
+    "name": "BLE scan",
+    "x": 340,
+    "y": 120,
+    "wires": [
+      [
+        "bthome-decode"
+      ]
+    ]
+  },
+  {
+    "id": "bthome-decode",
+    "type": "function",
+    "z": "bthome-tab",
+    "name": "Decode BTHome v2",
+    "func": "const DEVICES = {\n    \"AA:BB:CC:DD:EE:FF\": { name: \"Xiaomi_Mi3_Mini\", location: \"Room\" }\n};\nconst BTHOME_UUID_SHORT = \"fcd2\";\nfunction normalizeMac(mac){return String(mac||\"\").trim().toUpperCase();}\nfunction bytesToHex(value){\n    if(value==null)return null;\n    if(typeof value===\"string\")return value.replace(/^0x/i,\"\").replace(/[^0-9a-f]/gi,\"\").toLowerCase();\n    if(Buffer.isBuffer(value))return value.toString(\"hex\");\n    if(Array.isArray(value))return Buffer.from(value).toString(\"hex\");\n    if(value&&value.value!==undefined)return bytesToHex(value.value);\n    if(value&&value.data!==undefined)return bytesToHex(value.data);\n    return null;\n}\nfunction findBTHomeServiceData(serviceData){\n    if(!serviceData||typeof serviceData!==\"object\")return null;\n    for(const [uuid,value] of Object.entries(serviceData)){\n        const normalized=String(uuid).toLowerCase().replace(/[^0-9a-f]/g,\"\");\n        if(normalized.includes(BTHOME_UUID_SHORT))return bytesToHex(value);\n    }\n    return null;\n}\nfunction decodeBTHomeV2(hex){\n    const buf=Buffer.from(hex,\"hex\");\n    if(buf.length<2)return null;\n    const deviceInfo=buf[0];\n    if(deviceInfo&0x01){node.warn(\"Encrypted BTHome v2 packet ignored\");return null;}\n    let i=1; const out={};\n    while(i<buf.length){\n        const id=buf[i++];\n        switch(id){\n            case 0x00: if(i+1>buf.length)return out; out.packet_id=buf.readUInt8(i); i+=1; break;\n            case 0x01: if(i+1>buf.length)return out; out.battery=buf.readUInt8(i); i+=1; break;\n            case 0x02: if(i+2>buf.length)return out; out.temperature=buf.readInt16LE(i)*0.01; i+=2; break;\n            case 0x03: if(i+2>buf.length)return out; out.humidity=buf.readUInt16LE(i)*0.01; i+=2; break;\n            case 0x0c: if(i+2>buf.length)return out; out.battery_voltage=buf.readUInt16LE(i)*0.001; i+=2; break;\n            default: return out;\n        }\n    }\n    return out;\n}\nconst src=msg.payload||{};\nconst mac=normalizeMac(src.mac||src.address);\nconst device=DEVICES[mac];\nif(!device)return null;\nconst serviceData=src.serviceData||src.service_data||msg.serviceData||msg.service_data;\nconst hex=findBTHomeServiceData(serviceData);\nif(!hex)return null;\nconst decoded=decodeBTHomeV2(hex);\nif(!decoded)return null;\nconst key=`bthome:${mac}`;\nconst previous=context.get(key)||{};\nconst state={...previous,...decoded,name:device.name,location:device.location,mac,rssi:Number(src.rssi),last_seen:Date.now()};\ncontext.set(key,state);\nmsg.topic=device.name;\nmsg.payload=state;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 560,
+    "y": 120,
+    "wires": [
+      [
+        "bthome-map",
+        "bthome-debug"
+      ]
+    ]
+  },
+  {
+    "id": "bthome-map",
+    "type": "function",
+    "z": "bthome-tab",
+    "name": "Map to Victron Virtual Sensor",
+    "func": "const p=msg.payload||{}; const out={}; if(Number.isFinite(Number(p.temperature))) out[\"/Temperature\"]=Number(p.temperature); if(Number.isFinite(Number(p.humidity))) out[\"/Humidity\"]=Number(p.humidity); if(Number.isFinite(Number(p.battery_voltage))) out[\"/BatteryVoltage\"]=Number(p.battery_voltage); msg.payload=out; return Object.keys(out).length?msg:null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 830,
+    "y": 100,
+    "wires": [
+      [
+        "bthome-victron-debug"
+      ]
+    ]
+  },
+  {
+    "id": "bthome-debug",
+    "type": "debug",
+    "z": "bthome-tab",
+    "name": "Decoded sensor",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 820,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "bthome-victron-debug",
+    "type": "debug",
+    "z": "bthome-tab",
+    "name": "Victron payload",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 1090,
+    "y": 100,
+    "wires": []
+  }
+]

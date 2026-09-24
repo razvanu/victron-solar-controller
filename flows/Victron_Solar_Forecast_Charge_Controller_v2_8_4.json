@@ -1,0 +1,2104 @@
+[
+  {
+    "id": "cbb68a3d67f841a3",
+    "type": "tab",
+    "label": "Solar Forecast v2.8.4 CELL GUARD + DISCHARGE",
+    "disabled": false,
+    "info": "v2.7.1 keeps v2.7 battery-aware logic unchanged. Fixes Solcast freshness: Tomorrow max age 6h, Remaining Today 60m, Power 60m, and separates data-valid from fresh flags. NET 3-phase, Grid Guard, delayed-100, 50/70/100A policy, FORCE and BMS/DVCC protections remain unchanged.",
+    "env": []
+  },
+  {
+    "id": "e1730a6823be41e9",
+    "type": "comment",
+    "z": "cbb68a3d67f841a3",
+    "name": "v2.8.4 Telegram complet + watchdog + readback DVCC",
+    "info": "Extinde v2.7.2; un singur writer DVCC.",
+    "x": 570,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "d5cdaf5ec10847e7",
+    "type": "comment",
+    "z": "cbb68a3d67f841a3",
+    "name": "NET 3-PHASE neschimbat. v2.7.1: BMS CCL/CVL + cell-aware taper; Grid Guard remains fast.",
+    "info": "Boost uses filtered NET export (~25s). Grid Guard continues using instantaneous L1+L2+L3. Forecast freshness uses Home Assistant entity last_updated, not merely REST fetch time.",
+    "x": 590,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "ea24a3b5f9f8407e",
+    "type": "inject",
+    "z": "cbb68a3d67f841a3",
+    "name": "INIT CONFIG (startup)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 160,
+    "y": 140,
+    "wires": [
+      [
+        "2589328ae93145db"
+      ]
+    ]
+  },
+  {
+    "id": "2589328ae93145db",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "CONFIG v2.8.4 - Telegram complet + DVCC verification",
+    "func": "// ============================================================\n// Solar Forecast Charge Controller v2.8 BATTERY-AWARE\n// ============================================================\n// PAStrat din v2.6:\n//   GridNET = L1 + L2 + L3\n//   fara incarcare programata din retea\n//   MaxChargeCurrent = plafon, nu cerere de putere\n//   VERY_POOR: 90% -> 100% delayed/early-energy trigger\n//   50A normal; 70/100A numai la SOC mic cand este justificat\n//   FORCE ramane sub protectiile BMS/DVCC + Grid Guard\n//\n// Nou v2.7:\n//   - BMS read-only: CCL, CVL, max/min cell, temperatura, Connected\n//   - taper proactiv dupa CCL/CVL/cell voltage; SOC doar fallback aproape de 100%\n//   - boost 70/100A foloseste NET export filtrat (~25s), nu spike instantaneu\n//   - forecast stale bazat pe last_updated din Home Assistant\n// v2.8:\n//   - Tomorrow max age 6h; Remaining Today 60m; Power 60m\n//   - separa DATA VALID de FRESH pentru debugging clar\n// ============================================================\nconst cfg = {\n    enableOutputDefault: false,\n\n    haUrl: \"http://HOME_ASSISTANT_IP:8123\",\n    haToken: \"PASTE_LONG_LIVED_ACCESS_TOKEN\",\n\n    entityTomorrow: \"sensor.solcast_pv_forecast_forecast_tomorrow\",\n    entityRemainingToday: \"sensor.solcast_pv_forecast_forecast_remaining_today\",\n    entityPowerNow: \"sensor.solcast_pv_forecast_power_now\",\n    entityPower30m: \"sensor.solcast_pv_forecast_power_in_30_minutes\",\n    entityPower1h: \"sensor.solcast_pv_forecast_power_in_1_hour\",\n\n    veryPoorTomorrowKwh: 8,\n    poorTomorrowKwh: 15,\n    mediumTomorrowKwh: 25,\n    normalTargetSoc: 86,\n    socHysteresis: 3,\n\n    // ---- TARGET PLANNER v2.6/v2.7 ----\n    veryPoorHoldSoc: 90,\n    veryPoorFinalSoc: 100,\n    veryPoorNominalRaiseHour: 14,\n    veryPoorEarlyTriggerMargin: 1.25,\n\n    lowConfidence: 0.60,\n    highConfidence: 0.85,\n\n    fastRemainingTodayKwh: 2.0,\n    fastPowerNowW: 1200,\n    fastPowerUpcomingW: 2500,\n    fastNetExportW: 500,\n\n    hardMaxA: 100,\n\n    // ---- CURRENT POLICY v2.6/v2.7 ----\n    normalChargeMaxA: 50,\n    lowSocThreshold: 50,\n    veryLowSocThreshold: 30,\n    lowSocBoostA: 70,\n    veryLowSocBoostA: 100,\n    boost70EnergyMargin: 1.40,\n    boost100EnergyMargin: 1.10,\n    boost70NetExportW: 2500,\n    boost100NetExportW: 4000,\n\n    // ---- ENERGY MODEL ----\n    batteryCapacityKwh: 16.0,\n    chargeEfficiency: 0.95,\n    p50ToConservativeFactor: 0.70,\n    pvUsableFractionForBattery: 0.65,\n\n    // ---- BATTERY-AWARE v2.7 ----\n    // CAN-bus BMS pe Cerbo este in mod uzual VRM device instance 512.\n    // Flow-ul include input nodes pentru com.victronenergy.battery/512.\n    bmsDeviceInstance: 512,\n    batteryCellCount: 16,\n    batteryAwareEnabled: true,\n    commissioningChargeCapEnabled: false, // Plafon manual optional 10 A; inactiv implicit, independent de taper SOC/celule\n\n\n    // Soft ceiling nu inlocuieste CVL-ul BMS. Folosim MIN(CVL/cellCount, soft ceiling)\n    // doar pentru taper proactiv, BMS ramanand protectia finala.\n    cellSoftCeilingV: 3.45,\n    cellTaper40HeadroomV: 0.050,\n    cellTaper30HeadroomV: 0.035,\n    cellTaper20HeadroomV: 0.020,\n    cellTaper10HeadroomV: 0.010,\n\n    // Daca max-cell/CVL nu sunt disponibile, SOC este doar fallback foarte aproape de full.\n    fallbackSocTaper30: 95,\n    fallbackSocTaper20: 97,\n    fallbackSocTaper10: 99,\n\n    // Temperatura este citita si raportata, dar nu limiteaza suplimentar implicit.\n    // CCL-ul BMS continua sa fie respectat.\n    temperatureSoftTaperEnabled: false,\n    tempSoft30BelowC: 5,\n    tempSoft30AboveC: 45,\n\n    // Filtrare numai pentru decizii lente (boost/taper). Grid Guard ramane instantaneu.\n    gridFilterTauSec: 25,\n    batteryFilterTauSec: 10,\n\n    // ---- NET 3-PHASE GUARD, neschimbat ----\n    gridImportTripW: 350,\n    gridImportReleaseW: 100,\n    batteryChargingGuardA: 3,\n    guardTripSamples: 3,\n    guardReleaseSamples: 4,\n    guardSafetyMarginA: 2,\n    guardHardStopImportW: 1800,\n\n    minCurrentChangeA: 2,\n    statusEveryMs: 60000,\n\n    // ---- FORECAST FRESHNESS v2.8 ----\n    // Solcast nu actualizeaza neaparat sensorul TOMORROW la fiecare refresh.\n    // Remaining Today si Power sunt mult mai dinamice, deci raman stricte.\n    tomorrowForecastMaxAgeMs: 6 * 60 * 60 * 1000,\n    remainingForecastMaxAgeMs: 60 * 60 * 1000,\n    powerForecastMaxAgeMs: 60 * 60 * 1000,\n\n    // ========================================================\n    // TELEGRAM - pastrat din v2.5/v2.6\n    // ========================================================\n    telegramEnabled: true,\n    telegramBotToken: \"PASTE_TELEGRAM_BOT_TOKEN\",\n    telegramChatId: \"PASTE_TELEGRAM_CHAT_ID\",\n    telegramNotifyInDryRun: false,\n    telegramPollSeconds: 10, // intervalul inject ramane 10s\n    telegramCommandMaxAgeSec: 120,\n    telegramStatusMaxAgeMs: 30000,\n    telegramLiveMaxAgeMs: 120000,\n    telegramEventMinIntervalMs: 60000,\n    telegramBotUsername: \"\", // optional, fara @\n    // FORCE permis numai in chat privat, de catre proprietarul chatului.\n\n    // v2.8: timerele sunt in Europe/Bucharest, independent de TZ runtime.\n    timeZone: \"Europe/Bucharest\",\n    liveMaxAgeMs: 120000,\n    bmsMaxAgeMs: 120000,\n    dvccReadbackMaxAgeMs: 120000,\n    dvccRetryMs: 15000,\n    dvccMaxAttempts: 3,\n    targetMinSoc: 20,\n    targetMaxSoc: 100,\n    targetDefaultMinutes: 360,\n    targetMaxMinutes: 1440,\n    pauseMaxMinutes: 1440,\n    alertsDefault: true,\n    reportDefault: false,\n    reportDefaultTime: \"20:00\",\n    reportWindowMinutes: 15,\n    alertDebounceMs: 15000,\n    alertCooldownMs: 120000,\n    alertCclDeltaA: 10,\n    haDailyMaxAgeMs: 30 * 60 * 1000,\n    // Optional: EXCLUSIV senzori de energie pentru ziua curenta, nu contoare cumulative.\n    entityDailyPvSources: [\n        \"sensor.primo_5_0_1_energy_day\",\n        \"sensor.inverter_daily_yield\",\n        \"sensor.inverter_daily_yield_2\"\n    ],\n    energyCumulativeEntities: {\n        import: \"sensor.shelly_pro_3em_id_40_consumption\",\n        export: \"sensor.shelly_pro_3em_id_40_feed_in\",\n        charge: \"sensor.gx_device_dc_battery_charge_energy\",\n        discharge: \"sensor.gx_device_dc_battery_discharge_energy\"\n    },\n    energyStateBase: \"/data/solar-forecast/daily-energy-v1\",\n    energySaveEveryMs: 300000,\n    energyBoundaryMaxGapMs: 5 * 60000,\n    entityDailyPv: \"\", // legacy, not used by the new energy collector\n    entityDailyGridImport: \"\",\n    entityDailyGridExport: \"\",\n    entityDailyBatteryCharge: \"\",\n    entityDailyBatteryDischarge: \"\",\n    forceDefaultA: 100,\n    forceMaxA: 100,\n    forceMinMinutes: 1,\n    forceMaxMinutes: 60\n};\n\ncfg.haToken = env.get(\"SOLAR_HA_TOKEN\") || cfg.haToken;\ncfg.telegramBotToken = env.get(\"SOLAR_TELEGRAM_TOKEN\") || cfg.telegramBotToken;\ncfg.telegramChatId = env.get(\"SOLAR_TELEGRAM_CHAT_ID\") || cfg.telegramChatId;\nflow.set(\"solar_cfg\", cfg);\nflow.set(\"discharge_request\",null);flow.set(\"discharge_cancel\",!!(flow.get(\"discharge_bridge\")||{}).active);\nflow.set(\"controller_enabled\", cfg.enableOutputDefault);\nflow.set(\"grid_guard\", false);\nflow.set(\"grid_guard_hits\", 0);\nflow.set(\"grid_release_hits\", 0);\nflow.set(\"charge_blocked\", false);\nflow.set(\"last_dvcc_sent\", null);\nflow.set(\"last_status_ts\", 0);\n\n// filtrele se reinitializeaza din valorile live la primul tick\nflow.set(\"grid_total_filtered\", null);\nflow.set(\"grid_total_filtered_ts\", 0);\nflow.set(\"battery_voltage_filtered\", null);\nflow.set(\"battery_voltage_filtered_ts\", 0);\nflow.set(\"bms_max_cell_filtered\", null);\nflow.set(\"bms_max_cell_filtered_ts\", 0);\nflow.set(\"bms_temp_filtered\", null);\nflow.set(\"bms_temp_filtered_ts\", 0);\n\nnode.status({fill:\"blue\",shape:\"ring\",text:`CONFIG v2.8.1 loaded - ${cfg.enableOutputDefault ? \"CONTROL ON\" : \"DRY RUN\"}`});\nmsg.payload=Date.now();\n\nflow.set(\"telegram_session_start\", Math.floor(Date.now()/1000));\nflow.set(\"force_until\",0);\nflow.set(\"force_current_a\",0);\nflow.set(\"controller_status\",null);\nflow.set(\"manual_target\",null);\nflow.set(\"pause_until\",0);\nflow.set(\"writer_state\",{});\nflow.set(\"writer_fault\",null);\nflow.set(\"telegram_inflight\",null);\nflow.set(\"telegram_start\",Date.now());\nflow.set(\"telegram_alert_state\",null);\nflow.set(\"report_last_check\",null);\nflow.set(\"controller_events\",[]);\nflow.set(\"daily_soc\",null);\nflow.set(\"controller_started\",Date.now());\nflow.set(\"readback_confirmed\",false);\nflow.set(\"source_faults\",{});\nconst botId=String(cfg.telegramBotToken).split(\":\")[0];\nif(flow.get(\"telegram_offset_bot\")!==botId){flow.set(\"telegram_update_offset\",0);flow.set(\"telegram_offset_bot\",botId);}\nif(typeof flow.get(\"alerts_enabled\")!==\"boolean\")flow.set(\"alerts_enabled\",cfg.alertsDefault);\nif(typeof flow.get(\"report_enabled\")!==\"boolean\")flow.set(\"report_enabled\",cfg.reportDefault);\nif(!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(flow.get(\"report_time\")||\"\"))flow.set(\"report_time\",cfg.reportDefaultTime);\nflow.set(\"energy_ready\",false);\nflow.set(\"daily_energy\",null);\nflow.set(\"energy_storage_status\",\"LOADING\");\nreturn {filename:cfg.energyStateBase+\".A.json\"};\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 140,
+    "wires": [
+      [
+        "v281_read_a"
+      ]
+    ]
+  },
+  {
+    "id": "97fa5d8fb5a04444",
+    "type": "inject",
+    "z": "cbb68a3d67f841a3",
+    "name": "HA cached states + energy / 60 sec",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "60",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 20,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 200,
+    "wires": [
+      [
+        "1d327b3fac08497b"
+      ]
+    ]
+  },
+  {
+    "id": "57f3c7c3d1344a17",
+    "type": "inject",
+    "z": "cbb68a3d67f841a3",
+    "name": "Forecast refresh NOW",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 240,
+    "wires": [
+      [
+        "1d327b3fac08497b"
+      ]
+    ]
+  },
+  {
+    "id": "1d327b3fac08497b",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "HA REST request",
+    "func": "const cfg = flow.get(\"solar_cfg\");\nif (!cfg) {\n    node.status({fill:\"red\", shape:\"ring\", text:\"CONFIG missing\"});\n    return null;\n}\n\nif (!cfg.haUrl || cfg.haUrl.includes(\"HOME_ASSISTANT_IP\") ||\n    !cfg.haToken || cfg.haToken.includes(\"PASTE_LONG_LIVED_ACCESS_TOKEN\")) {\n    node.status({fill:\"yellow\", shape:\"ring\", text:\"Configureaza HA URL + TOKEN\"});\n    return null;\n}\n\nmsg.requestTimeout=10000;\nmsg.method = \"GET\";\nmsg.url = cfg.haUrl.replace(/\\/$/, \"\") + \"/api/states\";\nmsg.headers = {\n    \"Authorization\": \"Bearer \" + cfg.haToken,\n    \"Content-Type\": \"application/json\"\n};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 220,
+    "wires": [
+      [
+        "690bc2f8b8dd4b70"
+      ]
+    ]
+  },
+  {
+    "id": "690bc2f8b8dd4b70",
+    "type": "http request",
+    "z": "cbb68a3d67f841a3",
+    "name": "GET /api/states",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 650,
+    "y": 220,
+    "wires": [
+      [
+        "v281_energy",
+        "fb359611726a4ce0"
+      ]
+    ]
+  },
+  {
+    "id": "fb359611726a4ce0",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "Parse Solcast + DATA VALID + FRESHNESS v2.7.1",
+    "func": "const cfg = flow.get(\"solar_cfg\");\nif (!cfg || !Array.isArray(msg.payload)) {\n    for(const k of [\"forecast_valid\",\"forecast_tomorrow_data_valid\",\"forecast_remaining_data_valid\",\"forecast_power_data_valid\"])flow.set(k,false);\n    flow.set(\"ha_error\",\"INVALID_RESPONSE\");\n    node.status({fill:\"red\", shape:\"ring\", text:\"HA response invalid\"});\n    return null;\n}\n\nflow.set(\"ha_error\",null);flow.set(\"ha_success_ts\",Date.now());\nfunction findEntity(exactId, fallbackWords) {\n    let e = msg.payload.find(x => x && x.entity_id === exactId);\n    if (e) return e;\n    return undefined; // exact entity IDs only\n}\nfunction n(v) { if(v===null||v===undefined||typeof v===\"boolean\"||String(v).trim()===\"\")return null; const x = Number(v); return Number.isFinite(x)&&x>=0 ? x : null; }\nfunction clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }\nfunction entityTs(e) {\n    if (!e) return 0;\n    const t = Date.parse(e.last_updated || e.last_changed || \"\");\n    return Number.isFinite(t) ? t : 0;\n}\nfunction confidence3(p10, p50, p90) {\n    if (p50 === null || p50 <= 0 || p10 === null) return null;\n    const lower = clamp(p10 / p50, 0, 1);\n    if (p90 === null || p90 <= 0) return lower;\n    const upper = clamp(p50 / p90, 0, 1);\n    return clamp((lower + upper) / 2, 0, 1);\n}\n\nconst tomorrow = findEntity(cfg.entityTomorrow,[\"solcast\",\"forecast\",\"tomorrow\"]);\nconst remaining = findEntity(cfg.entityRemainingToday,[\"solcast\",\"forecast\",\"remaining\",\"today\"]);\nconst powerNowEnt = findEntity(cfg.entityPowerNow,[\"solcast\",\"power\",\"now\"]);\nconst power30Ent = findEntity(cfg.entityPower30m,[\"solcast\",\"power\",\"30\"]);\nconst power1hEnt = findEntity(cfg.entityPower1h,[\"solcast\",\"power\",\"1\",\"hour\"]);\n\nif (!tomorrow) {\n    flow.set(\"forecast_valid\", false);\n    flow.set(\"forecast_tomorrow_data_valid\", false);\n    flow.set(\"forecast_remaining_data_valid\", false);\n    flow.set(\"forecast_power_data_valid\", false);\n    // legacy flags\n    flow.set(\"forecast_tomorrow_valid\", false);\n    flow.set(\"forecast_remaining_valid\", false);\n    flow.set(\"forecast_power_valid\", false);\n    node.status({fill:\"red\", shape:\"ring\", text:\"Solcast TOMORROW lipseste\"});\n    msg.payload={ok:false,reason:\"Tomorrow entity not found\",expected:cfg.entityTomorrow};\n    return msg;\n}\n\nconst p50Tomorrow=n(tomorrow.state);\nconst p10Tomorrow=n(tomorrow.attributes?.estimate10);\nconst p90Tomorrow=n(tomorrow.attributes?.estimate90);\nconst remainingP50=remaining?n(remaining.state):null;\nconst remainingP10=remaining?n(remaining.attributes?.estimate10):null;\nconst remainingP90=remaining?n(remaining.attributes?.estimate90):null;\nconst powerNow=powerNowEnt?n(powerNowEnt.state):null;\nconst power30=power30Ent?n(power30Ent.state):null;\nconst power1h=power1hEnt?n(power1hEnt.state):null;\n\nif (p50Tomorrow === null || p50Tomorrow < 0) {\n    flow.set(\"forecast_valid\", false);\n    flow.set(\"forecast_tomorrow_data_valid\", false);\n    flow.set(\"forecast_tomorrow_valid\", false);\n    node.status({fill:\"red\",shape:\"ring\",text:\"Solcast P50 invalid\"});\n    msg.payload={ok:false,reason:\"Tomorrow P50 invalid\",entity:tomorrow.entity_id};\n    return msg;\n}\n\nconst conf=confidence3(p10Tomorrow,p50Tomorrow,p90Tomorrow);\nconst spreadKwh=(p10Tomorrow!==null&&p90Tomorrow!==null)?Math.max(0,p90Tomorrow-p10Tomorrow):null;\nconst spreadPct=(spreadKwh!==null&&p50Tomorrow>0)?spreadKwh/p50Tomorrow:null;\n\nconst tomorrowTs=entityTs(tomorrow);\nconst remainingTs=entityTs(remaining);\nconst powerTsCandidates=[powerNowEnt,power30Ent,power1hEnt].map(entityTs).filter(x=>x>0);\nconst powerTs=powerTsCandidates.length?Math.min(...powerTsCandidates):0;\n\nconst tomorrowDataValid=p50Tomorrow!==null;\nconst remainingDataValid=(remainingP10!==null&&remainingP10>=0)||(remainingP50!==null&&remainingP50>=0);\nconst powerDataValid=powerNow!==null||power30!==null||power1h!==null;\n\nconst nowTs=Date.now();\nconst tomorrowFresh=tomorrowDataValid&&tomorrowTs>0&&(nowTs-tomorrowTs)<=Number(cfg.tomorrowForecastMaxAgeMs||6*60*60*1000);\nconst remainingFresh=remainingDataValid&&remainingTs>0&&(nowTs-remainingTs)<=Number(cfg.remainingForecastMaxAgeMs||60*60*1000);\nconst powerFresh=powerDataValid&&powerTs>0&&(nowTs-powerTs)<=Number(cfg.powerForecastMaxAgeMs||60*60*1000);\nconst tomorrowAgeMin=tomorrowTs>0?Math.max(0,(nowTs-tomorrowTs)/60000):null;\nconst remainingAgeMin=remainingTs>0?Math.max(0,(nowTs-remainingTs)/60000):null;\nconst powerAgeMin=powerTs>0?Math.max(0,(nowTs-powerTs)/60000):null;\n\nflow.set(\"forecast_tomorrow_p50\",p50Tomorrow);\nflow.set(\"forecast_tomorrow_p10\",p10Tomorrow);\nflow.set(\"forecast_tomorrow_p90\",p90Tomorrow);\nflow.set(\"forecast_remaining_p50\",remainingP50);\nflow.set(\"forecast_remaining_p10\",remainingP10);\nflow.set(\"forecast_remaining_p90\",remainingP90);\nflow.set(\"forecast_power_now\",powerNow);\nflow.set(\"forecast_power_30m\",power30);\nflow.set(\"forecast_power_1h\",power1h);\nflow.set(\"forecast_confidence\",conf);\nflow.set(\"forecast_spread_kwh\",spreadKwh);\nflow.set(\"forecast_spread_pct\",spreadPct);\n\nflow.set(\"forecast_tomorrow_ts\",tomorrowDataValid?tomorrowTs:0);\nflow.set(\"forecast_remaining_ts\",remainingDataValid?remainingTs:0);\nflow.set(\"forecast_power_ts\",powerDataValid?powerTs:0);\n\n// v2.7.1: DATA VALID este separat de FRESH.\nflow.set(\"forecast_tomorrow_data_valid\",tomorrowDataValid);\nflow.set(\"forecast_remaining_data_valid\",remainingDataValid);\nflow.set(\"forecast_power_data_valid\",powerDataValid);\nflow.set(\"forecast_tomorrow_fresh\",tomorrowFresh);\nflow.set(\"forecast_remaining_fresh\",remainingFresh);\nflow.set(\"forecast_power_fresh\",powerFresh);\n\n// Legacy flags pastrate pentru compatibilitate cu eventuale noduri vechi.\nflow.set(\"forecast_tomorrow_valid\",tomorrowDataValid);\nflow.set(\"forecast_remaining_valid\",remainingDataValid);\nflow.set(\"forecast_power_valid\",powerDataValid);\nflow.set(\"forecast_ts\",tomorrowTs || Date.now());\nflow.set(\"forecast_valid\",tomorrowFresh);\n\nnode.status({\n    fill:tomorrowFresh?\"green\":\"yellow\",shape:\"dot\",\n    text:`P50 ${p50Tomorrow.toFixed(1)} | Tomorrow ${tomorrowFresh?\"FRESH\":\"STALE\"} ${tomorrowAgeMin===null?\"?\":Math.round(tomorrowAgeMin)}m`\n});\n\nmsg.payload={\n    ok:true,\n    tomorrowP10_kWh:p10Tomorrow,tomorrowP50_kWh:p50Tomorrow,tomorrowP90_kWh:p90Tomorrow,\n    confidence:conf,spread_kWh:spreadKwh,spread_pct_of_P50:spreadPct,\n    remainingTodayP10_kWh:remainingP10,remainingTodayP50_kWh:remainingP50,remainingTodayP90_kWh:remainingP90,\n    powerNow_W:powerNow,power30m_W:power30,power1h_W:power1h,\n    tomorrowEntity:tomorrow.entity_id,remainingEntity:remaining?.entity_id||null,\n    tomorrowLastUpdated:tomorrow.last_updated||null,\n    remainingLastUpdated:remaining?.last_updated||null,\n    tomorrowDataValid,remainingDataValid,powerDataValid,\n    tomorrowFresh,remainingFresh,powerFresh,\n    tomorrowAgeMin,remainingAgeMin,powerAgeMin,\n    tomorrowMaxAgeMin:Number(cfg.tomorrowForecastMaxAgeMs||0)/60000,\n    remainingMaxAgeMin:Number(cfg.remainingForecastMaxAgeMs||0)/60000,\n    powerMaxAgeMin:Number(cfg.powerForecastMaxAgeMs||0)/60000\n};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 880,
+    "y": 220,
+    "wires": [
+      [
+        "967e616c806644ff",
+        "c6ab3c4a488844e7"
+      ]
+    ]
+  },
+  {
+    "id": "967e616c806644ff",
+    "type": "debug",
+    "z": "cbb68a3d67f841a3",
+    "name": "Forecast parsed",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1110,
+    "y": 220,
+    "wires": []
+  },
+  {
+    "id": "5319d89a041b45da",
+    "type": "victron-input-system",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.system/0",
+    "path": "/Dc/Battery/Soc",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system"
+    },
+    "pathObj": {
+      "path": "/Dc/Battery/Soc",
+      "type": "float",
+      "name": "SOC baterie (%)"
+    },
+    "initial": "",
+    "name": "SOC baterie (%)",
+    "onlyChanges": false,
+    "roundValues": "2",
+    "x": 220,
+    "y": 340,
+    "wires": [
+      [
+        "c80a5b5229354406"
+      ]
+    ]
+  },
+  {
+    "id": "c516171c16b34e7f",
+    "type": "victron-input-system",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.system/0",
+    "path": "/Dc/Battery/Voltage",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system"
+    },
+    "pathObj": {
+      "path": "/Dc/Battery/Voltage",
+      "type": "float",
+      "name": "Tensiune baterie (V)"
+    },
+    "initial": "",
+    "name": "Tensiune baterie (V)",
+    "onlyChanges": false,
+    "roundValues": "2",
+    "x": 220,
+    "y": 380,
+    "wires": [
+      [
+        "1341243ceea14269"
+      ]
+    ]
+  },
+  {
+    "id": "399a9f596a054ad5",
+    "type": "victron-input-system",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.system/0",
+    "path": "/Dc/Battery/Current",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system"
+    },
+    "pathObj": {
+      "path": "/Dc/Battery/Current",
+      "type": "float",
+      "name": "Curent baterie (A)"
+    },
+    "initial": "",
+    "name": "Curent baterie (A)",
+    "onlyChanges": false,
+    "roundValues": "2",
+    "x": 220,
+    "y": 420,
+    "wires": [
+      [
+        "400969f749d5447a"
+      ]
+    ]
+  },
+  {
+    "id": "628bfea7c9de4e8f",
+    "type": "victron-input-system",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.system/0",
+    "path": "/Ac/Grid/L1/Power",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system"
+    },
+    "pathObj": {
+      "path": "/Ac/Grid/L1/Power",
+      "type": "float",
+      "name": "Grid L1 Power (W)"
+    },
+    "initial": "",
+    "name": "Grid L1 Power (W)",
+    "onlyChanges": false,
+    "roundValues": "2",
+    "x": 220,
+    "y": 480,
+    "wires": [
+      [
+        "9e8106df84334818"
+      ]
+    ]
+  },
+  {
+    "id": "3ac546106be74500",
+    "type": "victron-input-system",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.system/0",
+    "path": "/Ac/Grid/L2/Power",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system"
+    },
+    "pathObj": {
+      "path": "/Ac/Grid/L2/Power",
+      "type": "float",
+      "name": "Grid L2 Power (W)"
+    },
+    "initial": "",
+    "name": "Grid L2 Power (W)",
+    "onlyChanges": false,
+    "roundValues": "2",
+    "x": 220,
+    "y": 520,
+    "wires": [
+      [
+        "7bb18ee4bd12469f"
+      ]
+    ]
+  },
+  {
+    "id": "848e69e8924d41b0",
+    "type": "victron-input-system",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.system/0",
+    "path": "/Ac/Grid/L3/Power",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system"
+    },
+    "pathObj": {
+      "path": "/Ac/Grid/L3/Power",
+      "type": "float",
+      "name": "Grid L3 Power (W)"
+    },
+    "initial": "",
+    "name": "Grid L3 Power (W)",
+    "onlyChanges": false,
+    "roundValues": "2",
+    "x": 220,
+    "y": 560,
+    "wires": [
+      [
+        "16e076e7303d49a1"
+      ]
+    ]
+  },
+  {
+    "id": "c80a5b5229354406",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "store soc",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=0&&v<=100;\nflow.set(\"soc\",valid?v:null);flow.set(\"soc_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 510,
+    "y": 340,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "1341243ceea14269",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "store battery_voltage",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=20&&v<=80;\nflow.set(\"battery_voltage\",valid?v:null);flow.set(\"battery_voltage_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 510,
+    "y": 380,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "400969f749d5447a",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "store battery_current",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=-1000&&v<=1000;\nflow.set(\"battery_current\",valid?v:null);flow.set(\"battery_current_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 510,
+    "y": 420,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "9e8106df84334818",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "store grid_l1",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=-1000000&&v<=1000000;\nflow.set(\"grid_l1\",valid?v:null);flow.set(\"grid_l1_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 510,
+    "y": 480,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "7bb18ee4bd12469f",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "store grid_l2",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=-1000000&&v<=1000000;\nflow.set(\"grid_l2\",valid?v:null);flow.set(\"grid_l2_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 510,
+    "y": 520,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "16e076e7303d49a1",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "store grid_l3",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=-1000000&&v<=1000000;\nflow.set(\"grid_l3\",valid?v:null);flow.set(\"grid_l3_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 510,
+    "y": 560,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "cclremovedv21note",
+    "type": "comment",
+    "z": "cbb68a3d67f841a3",
+    "name": "BMS v2.7.1 READ-ONLY: CCL/CVL/MAX-MIN CELL/TEMP | controller still writes ONLY DVCC setting",
+    "info": "BMS CAN telemetry is read from battery instance 512. CCL/CVL and cell voltage can proactively lower the algorithmic cap; the controller never writes BMS paths. If these paths are unavailable, SOC fallback only tapers near 100%.",
+    "x": 660,
+    "y": 620,
+    "wires": []
+  },
+  {
+    "id": "0ece2fcb08f844fe",
+    "type": "victron-input-ess",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.settings",
+    "path": "/Settings/CGwacs/OvervoltageFeedIn",
+    "serviceObj": {
+      "service": "com.victronenergy.settings",
+      "name": "Venus settings",
+      "communityTag": "ess"
+    },
+    "pathObj": {
+      "path": "/Settings/CGwacs/OvervoltageFeedIn",
+      "type": "enum",
+      "name": "Feed excess DC-coupled PV into grid",
+      "enum": {
+        "0": "Off",
+        "1": "On"
+      },
+      "mode": "both"
+    },
+    "name": "DC Feed-in status",
+    "onlyChanges": false,
+    "roundValues": "0",
+    "x": 220,
+    "y": 680,
+    "wires": [
+      [
+        "d67e130ca3144073"
+      ]
+    ]
+  },
+  {
+    "id": "d67e130ca3144073",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "store DC feed-in",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=0&&v<=1;\nflow.set(\"dc_overfeed\",valid?v:null);flow.set(\"dc_overfeed_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 510,
+    "y": 680,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "26528cf5032d49e1",
+    "type": "comment",
+    "z": "cbb68a3d67f841a3",
+    "name": "BMS read-only: selecteaza aceeasi baterie reala in toate cele 7 noduri (inclusiv DCL)",
+    "info": "Victron CAN-bus BMS foloseste uzual VRM device instance 512. Paths: /Connected, /Info/MaxChargeCurrent, /Info/MaxChargeVoltage, /System/MaxCellVoltage, /System/MinCellVoltage, /Dc/0/Temperature. Niciunul nu este scris de flow.",
+    "x": 1250,
+    "y": 300,
+    "wires": []
+  },
+  {
+    "id": "da0085f957764e5b",
+    "type": "victron-input-custom",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.battery/512",
+    "path": "/Connected",
+    "serviceObj": {
+      "service": "com.victronenergy.battery/512",
+      "name": "VICTRON_CAN / CAN-bus BMS (512)"
+    },
+    "pathObj": {
+      "path": "/Connected",
+      "name": "/Connected",
+      "type": "number",
+      "value": 0
+    },
+    "name": "BMS Connected",
+    "onlyChanges": false,
+    "x": 1110,
+    "y": 340,
+    "wires": [
+      [
+        "99196a9b23954e40"
+      ]
+    ]
+  },
+  {
+    "id": "99196a9b23954e40",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "store bms_connected",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=0&&v<=1;\nflow.set(\"bms_connected\",valid?v:null);flow.set(\"bms_connected_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1390,
+    "y": 340,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "b96f64df856f4ef5",
+    "type": "victron-input-custom",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.battery/512",
+    "path": "/Info/MaxChargeCurrent",
+    "serviceObj": {
+      "service": "com.victronenergy.battery/512",
+      "name": "VICTRON_CAN / CAN-bus BMS (512)"
+    },
+    "pathObj": {
+      "path": "/Info/MaxChargeCurrent",
+      "name": "/Info/MaxChargeCurrent",
+      "type": "number",
+      "value": 0
+    },
+    "name": "BMS CCL (A)",
+    "onlyChanges": false,
+    "x": 1110,
+    "y": 380,
+    "wires": [
+      [
+        "da3cb08f0eae4f55"
+      ]
+    ]
+  },
+  {
+    "id": "da3cb08f0eae4f55",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "store bms_ccl",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=0&&v<=1000;\nflow.set(\"bms_ccl\",valid?v:null);flow.set(\"bms_ccl_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1390,
+    "y": 380,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "44d6f1a0472e40c5",
+    "type": "victron-input-custom",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.battery/512",
+    "path": "/Info/MaxChargeVoltage",
+    "serviceObj": {
+      "service": "com.victronenergy.battery/512",
+      "name": "VICTRON_CAN / CAN-bus BMS (512)"
+    },
+    "pathObj": {
+      "path": "/Info/MaxChargeVoltage",
+      "name": "/Info/MaxChargeVoltage",
+      "type": "number",
+      "value": 0
+    },
+    "name": "BMS CVL (V)",
+    "onlyChanges": false,
+    "x": 1110,
+    "y": 420,
+    "wires": [
+      [
+        "d75a6e11cf144ff4"
+      ]
+    ]
+  },
+  {
+    "id": "d75a6e11cf144ff4",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "store bms_cvl",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=20&&v<=80;\nflow.set(\"bms_cvl\",valid?v:null);flow.set(\"bms_cvl_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1390,
+    "y": 420,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "d67e2e05e34e4a85",
+    "type": "victron-input-custom",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.battery/512",
+    "path": "/System/MaxCellVoltage",
+    "serviceObj": {
+      "service": "com.victronenergy.battery/512",
+      "name": "VICTRON_CAN / CAN-bus BMS (512)"
+    },
+    "pathObj": {
+      "path": "/System/MaxCellVoltage",
+      "name": "/System/MaxCellVoltage",
+      "type": "number",
+      "value": 0
+    },
+    "name": "BMS Max cell (V)",
+    "onlyChanges": false,
+    "x": 1110,
+    "y": 460,
+    "wires": [
+      [
+        "a6ee7fdb50f848ce"
+      ]
+    ]
+  },
+  {
+    "id": "a6ee7fdb50f848ce",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "store bms_max_cell",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=1&&v<=5;\nflow.set(\"bms_max_cell\",valid?v:null);flow.set(\"bms_max_cell_ts\",valid?Date.now():0);\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1390,
+    "y": 460,
+    "wires": [
+      [
+        "c6ab3c4a488844e7"
+      ]
+    ]
+  },
+  {
+    "id": "a16f9d1d3a6d4242",
+    "type": "victron-input-custom",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.battery/512",
+    "path": "/System/MinCellVoltage",
+    "serviceObj": {
+      "service": "com.victronenergy.battery/512",
+      "name": "VICTRON_CAN / CAN-bus BMS (512)"
+    },
+    "pathObj": {
+      "path": "/System/MinCellVoltage",
+      "name": "/System/MinCellVoltage",
+      "type": "number",
+      "value": 0
+    },
+    "name": "BMS Min cell (V)",
+    "onlyChanges": false,
+    "x": 1110,
+    "y": 500,
+    "wires": [
+      [
+        "74411dcccded4649"
+      ]
+    ]
+  },
+  {
+    "id": "74411dcccded4649",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "store bms_min_cell",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=1&&v<=5;\nflow.set(\"bms_min_cell\",valid?v:null);flow.set(\"bms_min_cell_ts\",valid?Date.now():0);\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1390,
+    "y": 500,
+    "wires": [
+      [
+        "c6ab3c4a488844e7"
+      ]
+    ]
+  },
+  {
+    "id": "789dfd57d5464d83",
+    "type": "victron-input-custom",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.battery/512",
+    "path": "/Dc/0/Temperature",
+    "serviceObj": {
+      "service": "com.victronenergy.battery/512",
+      "name": "VICTRON_CAN / CAN-bus BMS (512)"
+    },
+    "pathObj": {
+      "path": "/Dc/0/Temperature",
+      "name": "/Dc/0/Temperature",
+      "type": "number",
+      "value": 0
+    },
+    "name": "BMS Battery temp (C)",
+    "onlyChanges": false,
+    "x": 1110,
+    "y": 540,
+    "wires": [
+      [
+        "c311021b97ee4f60"
+      ]
+    ]
+  },
+  {
+    "id": "c311021b97ee4f60",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "store bms_temp",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=-60&&v<=120;\nflow.set(\"bms_temp\",valid?v:null);flow.set(\"bms_temp_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1390,
+    "y": 540,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "0bf59998475f46b3",
+    "type": "inject",
+    "z": "cbb68a3d67f841a3",
+    "name": "Controller tick / 5 sec",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "5",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 5,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 760,
+    "wires": [
+      [
+        "c6ab3c4a488844e7"
+      ]
+    ]
+  },
+  {
+    "id": "c6ab3c4a488844e7",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "FORECAST + BATTERY-AWARE + DELAYED100 + BOOST + FORCE + NET GUARD",
+    "func": "const cfg=flow.get(\"solar_cfg\");\nif(!cfg){node.status({fill:\"red\",shape:\"ring\",text:\"CONFIG missing\"});return [null,null];}\n\nfunction val(key){\n    if(key.startsWith(\"bms_\")){const ts=Number(flow.get(key+\"_ts\")||0);if(!ts||Date.now()-ts>cfg.bmsMaxAgeMs)return null;}const raw=flow.get(key);if(raw===null||raw===undefined||raw===\"\")return null;const x=Number(raw);return Number.isFinite(x)?x:null;}\nfunction clamp(x,lo,hi){return Math.max(lo,Math.min(hi,x));}\nfunction fresh(validKey,tsKey,maxAge){\n    if(flow.get(validKey)!==true)return false;\n    const ts=val(tsKey);return ts!==null&&ts>0&&(Date.now()-ts)<=maxAge;\n}\nfunction ema(key,sample,tauSec){\n    if(sample===null||!Number.isFinite(sample))return val(key);\n    const now=Date.now();\n    const prev=val(key),prevTs=val(key+\"_ts\");\n    if(prev===null||prevTs===null||prevTs<=0||now<=prevTs){\n        flow.set(key,sample);flow.set(key+\"_ts\",now);return sample;\n    }\n    const dt=Math.max(0.001,(now-prevTs)/1000);\n    const alpha=1-Math.exp(-dt/Math.max(0.1,tauSec));\n    const out=prev+alpha*(sample-prev);\n    flow.set(key,out);flow.set(key+\"_ts\",now);return out;\n}\n\n// Timed commands use absolute deadlines; no timer can silently enable DRY RUN.\nfunction event(kind,detail){const q=flow.get(\"controller_events\")||[];q.push({kind,detail,ts:Date.now()});flow.set(\"controller_events\",q.slice(-40));}\nconst nowMs=Date.now();\nconst localParts=new Intl.DateTimeFormat(\"en-GB\",{timeZone:cfg.timeZone,year:\"numeric\",month:\"2-digit\",day:\"2-digit\",hour:\"2-digit\",hourCycle:\"h23\"}).formatToParts(new Date(nowMs));\nconst localMap=Object.fromEntries(localParts.map(p=>[p.type,p.value]));\nconst localDay=localMap.year+\"-\"+localMap.month+\"-\"+localMap.day;\nconst localHour=Number(localMap.hour);\nlet mt=flow.get(\"manual_target\");\nif(mt&&mt.until<=nowMs){flow.set(\"manual_target\",null);event(\"TARGET_EXPIRED\",\"Tinta manuala a expirat; revenire la forecast.\");}\nconst pu=Number(flow.get(\"pause_until\")||0);\nif(pu>0&&pu<=nowMs){flow.set(\"pause_until\",0);flow.set(\"writer_state\",{});event(\"PAUSE_EXPIRED\",\"Pauza a expirat; controlul poate relua scrierile daca este activ local.\");}\nconst fu=Number(flow.get(\"force_until\")||0);\nif(fu>0&&fu<=nowMs){flow.set(\"force_until\",0);flow.set(\"force_current_a\",0);event(\"FORCE_EXPIRED\",\"FORCE a expirat; revenire la strategia automata/manuala.\");}\n// Measured SOC range only; never labelled a full-day history after partial observation.\nconst socSample=val(\"soc\"),socTs=Number(flow.get(\"soc_ts\")||0);\nlet ds=flow.get(\"daily_soc\");\nif(socSample!==null&&socTs>0&&nowMs-socTs<=cfg.liveMaxAgeMs){\n if(!ds||ds.day!==localDay)ds={day:localDay,start:nowMs,min:socSample,max:socSample,last:nowMs};\n else{ds.min=Math.min(ds.min,socSample);ds.max=Math.max(ds.max,socSample);ds.last=nowMs;}\n flow.set(\"daily_soc\",ds);\n}\n\n// -------- LIVE VICTRON --------\nconst soc=val(\"soc\"),battV=val(\"battery_voltage\"),battI=val(\"battery_current\");\nconst g1=val(\"grid_l1\"),g2=val(\"grid_l2\"),g3=val(\"grid_l3\");\nconst overFeed=val(\"dc_overfeed\");\nif(soc===null||battV===null||battI===null||g1===null||g2===null||g3===null){\n    const status={timestamp:Date.now(),enabled:flow.get(\"controller_enabled\")===true,controllerFault:\"LIVE_MISSING\",soc,desiredA:0};\n    flow.set(\"controller_status\",status);node.status({fill:\"red\",shape:\"ring\",text:\"Lipsa date: cerere 0A\"});return [{payload:0},{payload:status}];\n}\nconst gridTotalW=g1+g2+g3;                 // + import / - export\nconst netExportW=gridTotalW<0?-gridTotalW:0;\nconst netImportW=gridTotalW>0?gridTotalW:0;\n\n// Grid Guard foloseste valoarea instantanee. Boost-ul foloseste filtrul lent.\nconst gridTotalFilteredW=ema(\"grid_total_filtered\",gridTotalW,Number(cfg.gridFilterTauSec||25));\nconst netExportFilteredW=gridTotalFilteredW!==null&&gridTotalFilteredW<0?-gridTotalFilteredW:0;\nconst battVFiltered=ema(\"battery_voltage_filtered\",battV,Number(cfg.batteryFilterTauSec||10));\n\n// -------- BMS READ-ONLY --------\nconst bmsConnectedRaw=val(\"bms_connected\");\nconst bmsCcl=val(\"bms_ccl\");\nconst bmsCvl=val(\"bms_cvl\");\nconst bmsMaxCell=val(\"bms_max_cell\");\nconst bmsMinCell=val(\"bms_min_cell\");\nconst bmsTemp=val(\"bms_temp\");\nconst bmsAnyData=[bmsCcl,bmsCvl,bmsMaxCell,bmsMinCell,bmsTemp].some(x=>x!==null);\nconst bmsConnected=bmsConnectedRaw===1;\nconst bmsMaxCellFiltered=bmsMaxCell!==null?ema(\"bms_max_cell_filtered\",bmsMaxCell,Number(cfg.batteryFilterTauSec||10)):val(\"bms_max_cell_filtered\");\nconst bmsTempFiltered=bmsTemp!==null?ema(\"bms_temp_filtered\",bmsTemp,Number(cfg.batteryFilterTauSec||10)):val(\"bms_temp_filtered\");\nconst cellDeltaV=(bmsMaxCell!==null&&bmsMinCell!==null)?Math.max(0,bmsMaxCell-bmsMinCell):null;\n\n// -------- SOLCAST: DATA VALID + FRESHNESS SEPARATE v2.7.1 --------\nconst tomorrowDataValid=flow.get(\"forecast_tomorrow_data_valid\")===true;\nconst remainingDataValid=flow.get(\"forecast_remaining_data_valid\")===true;\nconst powerDataValid=flow.get(\"forecast_power_data_valid\")===true;\n\nconst tomorrowValid=fresh(\"forecast_tomorrow_data_valid\",\"forecast_tomorrow_ts\",Number(cfg.tomorrowForecastMaxAgeMs||6*60*60*1000));\nconst remainingValid=fresh(\"forecast_remaining_data_valid\",\"forecast_remaining_ts\",Number(cfg.remainingForecastMaxAgeMs||60*60*1000));\nconst powerValid=fresh(\"forecast_power_data_valid\",\"forecast_power_ts\",Number(cfg.powerForecastMaxAgeMs||60*60*1000));\nconst forecastValid=tomorrowValid; // compatibilitate status/Telegram\n\nconst p50=tomorrowValid?val(\"forecast_tomorrow_p50\"):null;\nconst p10=tomorrowValid?val(\"forecast_tomorrow_p10\"):null;\nconst p90=tomorrowValid?val(\"forecast_tomorrow_p90\"):null;\nconst remainingP50=remainingValid?val(\"forecast_remaining_p50\"):null;\nconst remainingP10=remainingValid?val(\"forecast_remaining_p10\"):null;\nconst remainingP90=remainingValid?val(\"forecast_remaining_p90\"):null;\nconst powerNow=powerValid?val(\"forecast_power_now\"):null;\nconst power30=powerValid?val(\"forecast_power_30m\"):null;\nconst power1h=powerValid?val(\"forecast_power_1h\"):null;\nlet confidence=tomorrowValid?val(\"forecast_confidence\"):null;\nif(confidence===null&&p10!==null&&p50!==null&&p50>0)confidence=clamp(p10/p50,0,1);\nconst spreadKwh=tomorrowValid?val(\"forecast_spread_kwh\"):null;\nconst spreadPct=tomorrowValid?val(\"forecast_spread_pct\"):null;\n\nconst tomorrowTs=val(\"forecast_tomorrow_ts\");\nconst remainingTs=val(\"forecast_remaining_ts\");\nconst powerTs=val(\"forecast_power_ts\");\nconst tomorrowAgeMin=tomorrowTs?Math.max(0,(Date.now()-tomorrowTs)/60000):null;\nconst remainingAgeMin=remainingTs?Math.max(0,(Date.now()-remainingTs)/60000):null;\nconst powerAgeMin=powerTs?Math.max(0,(Date.now()-powerTs)/60000):null;\n\n// -------- TARGET PLANNER v2.6, cu freshness fix v2.7.1 --------\nlet forecastClass=\"FALLBACK\";\nlet baseTargetSoc=cfg.normalTargetSoc;\nlet finalTargetSoc=cfg.normalTargetSoc;\nlet targetSoc=cfg.normalTargetSoc;\nlet veryPoorStage=\"NONE\";\nlet veryPoorRaiseReason=\"NONE\";\nlet energyNeededTo100Kwh=null;\nlet marginTo100=null;\n\nif(tomorrowValid&&p50!==null){\n    if(p50<cfg.veryPoorTomorrowKwh){forecastClass=\"VERY_POOR\";baseTargetSoc=cfg.veryPoorHoldSoc;finalTargetSoc=cfg.veryPoorFinalSoc;targetSoc=baseTargetSoc;}\n    else if(p50<cfg.poorTomorrowKwh){forecastClass=\"POOR\";baseTargetSoc=95;finalTargetSoc=95;targetSoc=95;}\n    else if(p50<cfg.mediumTomorrowKwh){forecastClass=\"MEDIUM\";baseTargetSoc=90;finalTargetSoc=90;targetSoc=90;}\n    else{forecastClass=\"GOOD\";baseTargetSoc=cfg.normalTargetSoc;finalTargetSoc=cfg.normalTargetSoc;targetSoc=cfg.normalTargetSoc;}\n\n    if(forecastClass!==\"VERY_POOR\"&&confidence!==null&&confidence<cfg.lowConfidence&&targetSoc<100){\n        targetSoc=Math.min(100,targetSoc+5);baseTargetSoc=targetSoc;finalTargetSoc=targetSoc;forecastClass+=\"_UNCERTAIN\";\n    }\n}\n\nlet conservativeSolarRemainingKwh=null;\nlet conservativeSolarSource=\"NONE\";\nif(remainingValid&&remainingP10!==null&&remainingP10>=0){conservativeSolarRemainingKwh=remainingP10;conservativeSolarSource=\"P10\";}\nelse if(remainingValid&&remainingP50!==null&&remainingP50>=0){conservativeSolarRemainingKwh=remainingP50*cfg.p50ToConservativeFactor;conservativeSolarSource=\"P50xFACTOR\";}\nconst usableSolarForBatteryKwh=conservativeSolarRemainingKwh!==null?conservativeSolarRemainingKwh*cfg.pvUsableFractionForBattery:null;\n\nif(forecastClass===\"VERY_POOR\"){\n    energyNeededTo100Kwh=Math.max(0,cfg.batteryCapacityKwh*Math.max(0,100-soc)/100/cfg.chargeEfficiency);\n    marginTo100=(usableSolarForBatteryKwh!==null&&energyNeededTo100Kwh>0.05)?usableSolarForBatteryKwh/energyNeededTo100Kwh:null;\n    const now=new Date();\n    const afterNominal=localHour>=Number(cfg.veryPoorNominalRaiseHour||14);\n    const earlyEnergyTrigger=marginTo100!==null&&marginTo100<=Number(cfg.veryPoorEarlyTriggerMargin||1.25);\n\n    if(soc>=99.5){targetSoc=100;veryPoorStage=\"FINAL_100\";veryPoorRaiseReason=\"ALREADY_FULL\";}\n    else if(!remainingValid){\n        // Maine este VERY_POOR dar nu mai avem un Remaining Today proaspat: nu riscam sa amanam.\n        targetSoc=100;veryPoorStage=\"FINAL_100\";veryPoorRaiseReason=\"REMAINING_FORECAST_STALE\";\n    }\n    else if(afterNominal){targetSoc=100;veryPoorStage=\"FINAL_100\";veryPoorRaiseReason=\"NOMINAL_TIME\";}\n    else if(earlyEnergyTrigger){targetSoc=100;veryPoorStage=\"FINAL_100\";veryPoorRaiseReason=\"EARLY_ENERGY_RISK\";}\n    else{targetSoc=cfg.veryPoorHoldSoc;veryPoorStage=\"HOLD_90\";veryPoorRaiseReason=\"DELAY_TO_PROTECT_FULL_TIME\";}\n}\n\n// v2.8 manual target: bounded lifetime, still under taper/BMS/NET Guard.\nconst forecastTargetSoc=targetSoc;\nconst manual=flow.get(\"manual_target\");\nconst manualActive=!!manual&&manual.until>Date.now();\nif(manualActive){targetSoc=manual.soc;finalTargetSoc=manual.soc;}\n// -------- HYSTERESIS --------\nlet blocked=flow.get(\"charge_blocked\")===true;\nconst oldTarget=val(\"target_soc\");\nif(soc>=targetSoc)blocked=true;\nif(blocked&&soc<=targetSoc-cfg.socHysteresis)blocked=false;\nif(blocked&&oldTarget!==null&&targetSoc>oldTarget&&soc<targetSoc-0.5)blocked=false;\nflow.set(\"charge_blocked\",blocked);flow.set(\"target_soc\",targetSoc);\n\n// -------- SOLAR OPPORTUNITY --------\nconst upcomingPower=Math.max(powerNow??0,power30??0,power1h??0);\nconst solarOpportunity=(remainingP50!==null&&remainingP50>=cfg.fastRemainingTodayKwh)||(powerNow!==null&&powerNow>=cfg.fastPowerNowW)||(upcomingPower>=cfg.fastPowerUpcomingW)||(netExportFilteredW>=cfg.fastNetExportW);\n\n// -------- CURRENT POLICY: 50A NORMAL, BOOST LOW-SOC --------\nconst socGapPct=Math.max(0,targetSoc-soc);\nconst batteryEnergyNeededKwh=socGapPct>0?(cfg.batteryCapacityKwh*socGapPct/100/cfg.chargeEfficiency):0;\nconst energyMargin=(usableSolarForBatteryKwh!==null&&batteryEnergyNeededKwh>0.05)?usableSolarForBatteryKwh/batteryEnergyNeededKwh:null;\n\nlet strategyA=0;\nlet energyDecision=\"BLOCKED_AT_TARGET\";\nlet boostReason=\"NONE\";\nif(!blocked){\n    strategyA=Number(cfg.normalChargeMaxA||50);\n    energyDecision=\"NORMAL_MAX_50A\";\n\n    const need70=(energyMargin!==null&&energyMargin<Number(cfg.boost70EnergyMargin||1.40))||netExportFilteredW>=Number(cfg.boost70NetExportW||2500);\n    if(soc<Number(cfg.lowSocThreshold||50)&&solarOpportunity&&need70){\n        strategyA=Math.max(strategyA,Number(cfg.lowSocBoostA||70));\n        boostReason=netExportFilteredW>=Number(cfg.boost70NetExportW||2500)?\"FILTERED_NET_EXPORT\":\"LOW_ENERGY_MARGIN\";\n        energyDecision=\"LOW_SOC_BOOST_70A\";\n    }\n\n    const need100=(energyMargin!==null&&energyMargin<Number(cfg.boost100EnergyMargin||1.10))||netExportFilteredW>=Number(cfg.boost100NetExportW||4000);\n    if(soc<Number(cfg.veryLowSocThreshold||30)&&solarOpportunity&&need100){\n        strategyA=Math.max(strategyA,Number(cfg.veryLowSocBoostA||100));\n        boostReason=netExportFilteredW>=Number(cfg.boost100NetExportW||4000)?\"FILTERED_NET_EXPORT\":\"CRITICAL_ENERGY_MARGIN\";\n        energyDecision=\"VERY_LOW_SOC_BOOST_100A\";\n    }\n}\nstrategyA=clamp(Math.round(strategyA),0,cfg.hardMaxA);\nconst automaticStrategyA=strategyA;\n\n// -------- TELEGRAM FORCE: forecast/target ignorate, protectiile raman --------\nconst forceUntil=Number(flow.get(\"force_until\")||0);\nconst forceRequestedA=Number(flow.get(\"force_current_a\")||cfg.forceDefaultA||cfg.hardMaxA);\nconst forceActive=forceUntil>Date.now();\nlet forceMinutesLeft=0;\nif(forceActive){\n    forceMinutesLeft=Math.ceil((forceUntil-Date.now())/60000);\n    strategyA=clamp(Math.round(forceRequestedA),1,Math.min(Number(cfg.forceMaxA||cfg.hardMaxA),cfg.hardMaxA));\n    energyDecision=\"TELEGRAM_FORCE_\"+strategyA+\"A\";\n}else if(forceUntil>0){flow.set(\"force_until\",0);flow.set(\"force_current_a\",0);}\n\n// -------- BATTERY-AWARE CAP v2.7 --------\n// Acesta este un plafon proactiv; nu inlocuieste BMS/DVCC.\nlet batteryAwareCapA=cfg.hardMaxA;\nlet batteryTaperReason=\"NONE\";\nlet batteryTaperSource=\"NONE\";\nlet cellCeilingV=null,cellHeadroomV=null,packCeilingV=null,packHeadroomV=null;\nlet bmsCclLimited=false;\n\nif(cfg.batteryAwareEnabled!==false){\n    const cellCount=Math.max(1,Number(cfg.batteryCellCount||16));\n\n    // 1) CCL BMS: respectam direct orice reducere transmisa de BMS.\n    if(bmsConnected&&bmsCcl!==null&&bmsCcl>=0){\n        const cclCap=clamp(Math.floor(bmsCcl),0,cfg.hardMaxA);\n        if(cclCap<batteryAwareCapA){batteryAwareCapA=cclCap;batteryTaperReason=\"BMS_CCL\";batteryTaperSource=\"CCL\";}\n        bmsCclLimited=cclCap<strategyA;\n    }\n\n    // 2) Max cell + CVL este sursa preferata pentru taper langa full.\n    if(bmsConnected&&bmsCvl!==null&&bmsCvl>0&&bmsMaxCellFiltered!==null&&bmsMaxCellFiltered>0){\n        cellCeilingV=Math.min(bmsCvl/cellCount,Number(cfg.cellSoftCeilingV||99));\n        cellHeadroomV=cellCeilingV-bmsMaxCellFiltered;\n        let cellCap=cfg.hardMaxA;\n        if(cellHeadroomV<=Number(cfg.cellTaper10HeadroomV||0.010))cellCap=10;\n        else if(cellHeadroomV<=Number(cfg.cellTaper20HeadroomV||0.020))cellCap=20;\n        else if(cellHeadroomV<=Number(cfg.cellTaper30HeadroomV||0.035))cellCap=30;\n        else if(cellHeadroomV<=Number(cfg.cellTaper40HeadroomV||0.050))cellCap=40;\n        if(cellCap<batteryAwareCapA){batteryAwareCapA=cellCap;batteryTaperReason=\"MAX_CELL_HEADROOM\";batteryTaperSource=\"CELL\";}\n    }\n    // 3) Daca max-cell lipseste, folosim pack voltage vs CVL ca fallback BMS-aware.\n    else if(bmsConnected&&bmsCvl!==null&&bmsCvl>0&&battVFiltered!==null){\n        packCeilingV=Math.min(bmsCvl,Number(cfg.cellSoftCeilingV||99)*cellCount);\n        packHeadroomV=packCeilingV-battVFiltered;\n        let packCap=cfg.hardMaxA;\n        if(packHeadroomV<=Number(cfg.cellTaper10HeadroomV||0.010)*cellCount)packCap=10;\n        else if(packHeadroomV<=Number(cfg.cellTaper20HeadroomV||0.020)*cellCount)packCap=20;\n        else if(packHeadroomV<=Number(cfg.cellTaper30HeadroomV||0.035)*cellCount)packCap=30;\n        else if(packHeadroomV<=Number(cfg.cellTaper40HeadroomV||0.050)*cellCount)packCap=40;\n        if(packCap<batteryAwareCapA){batteryAwareCapA=packCap;batteryTaperReason=\"PACK_CVL_HEADROOM\";batteryTaperSource=\"PACK\";}\n    }\n    // 4) Fara CVL/cell telemetry: SOC ramane doar fallback foarte aproape de 100%.\n    else{\n        let socCap=cfg.hardMaxA;\n        if(soc>=Number(cfg.fallbackSocTaper10||99))socCap=10;\n        else if(soc>=Number(cfg.fallbackSocTaper20||97))socCap=20;\n        else if(soc>=Number(cfg.fallbackSocTaper30||95))socCap=30;\n        if(socCap<batteryAwareCapA){batteryAwareCapA=socCap;batteryTaperReason=\"SOC_FALLBACK\";batteryTaperSource=\"SOC\";}\n    }\n\n    // Temperatura este optionala; implicit OFF ca sa nu schimbam agresiv comportamentul PACE.\n    if(cfg.temperatureSoftTaperEnabled===true&&bmsTempFiltered!==null){\n        if(bmsTempFiltered<=Number(cfg.tempSoft30BelowC||5)||bmsTempFiltered>=Number(cfg.tempSoft30AboveC||45)){\n            if(30<batteryAwareCapA){batteryAwareCapA=30;batteryTaperReason=\"TEMPERATURE_SOFT_CAP\";batteryTaperSource=\"TEMP\";}\n        }\n    }\n}\n\nbatteryAwareCapA=clamp(Math.round(batteryAwareCapA),0,cfg.hardMaxA);\nlet desiredA=Math.min(strategyA,batteryAwareCapA);\n\n// -------- NET 3-PHASE GRID GUARD: NEsCHIMBAT, INSTANTANEU --------\nlet guard=flow.get(\"grid_guard\")===true;\nlet trip=Number(flow.get(\"grid_guard_hits\")||0);\nlet release=Number(flow.get(\"grid_release_hits\")||0);\nconst looksLikeGridCharging=gridTotalW>cfg.gridImportTripW&&battI>cfg.batteryChargingGuardA;\nif(!guard){\n    trip=looksLikeGridCharging?trip+1:0;\n    if(trip>=cfg.guardTripSamples){guard=true;release=0;}\n}else{\n    const safeAgain=gridTotalW<=cfg.gridImportReleaseW||battI<=0;\n    release=safeAgain?release+1:0;\n    if(release>=cfg.guardReleaseSamples){guard=false;trip=0;release=0;}\n}\nflow.set(\"grid_guard\",guard);flow.set(\"grid_guard_hits\",trip);flow.set(\"grid_release_hits\",release);\n\nlet guardCalculatedA=null,gridEquivalentA=null;\nif(guard){\n    if(gridTotalW>=cfg.guardHardStopImportW&&battI>cfg.batteryChargingGuardA){desiredA=0;guardCalculatedA=0;}\n    else if(gridTotalW>0&&battI>0&&battV>0){\n        gridEquivalentA=gridTotalW/battV;\n        guardCalculatedA=Math.max(0,Math.floor(battI-gridEquivalentA-cfg.guardSafetyMarginA));\n        desiredA=Math.min(desiredA,guardCalculatedA);\n    }\n}\n// FORCE100 is a solar-only target, not a current override.\nlet solarOnlyCapA=null;\nif(manualActive&&manual.solarOnly){\n    solarOnlyCapA=Math.max(0,Math.floor(battI-gridTotalW/(Math.max(1,battV)*cfg.chargeEfficiency)-cfg.guardSafetyMarginA));\n    desiredA=Math.min(desiredA,solarOnlyCapA);\n}\ndesiredA=clamp(Math.round(desiredA),0,cfg.hardMaxA);\n\n// v2.8 all decisions go through one verification gate; only it feeds the existing DVCC writer.\nconst enabled=flow.get(\"controller_enabled\")===true;\nconst paused=Number(flow.get(\"pause_until\")||0)>Date.now();\nconst mustSend=false; // writes are decided by the downstream gate, including readback/retries.\nlet out={payload:desiredA};\n\n// -------- STATUS --------\nconst status={\n    timestamp:Date.now(),paused,pauseUntil:Number(flow.get(\"pause_until\")||0),\n    manualTargetActive:manualActive,manualTarget:manualActive?manual:null,forecastTargetSoc,solarOnlyCapA,\n    targetSource:manualActive?(manual.solarOnly?\"FORCE100\":\"MANUAL\"):\"FORECAST\",\n    enabled,soc,targetSoc,baseTargetSoc,finalTargetSoc,blocked,\n    desiredA,strategyA,automaticStrategyA,batteryAwareCapA,batteryTaperReason,batteryTaperSource,\n    bmsConnected,bmsCcl,bmsCvl,bmsMaxCell,bmsMinCell,bmsMaxCellFiltered,bmsTemp,bmsTempFiltered,cellDeltaV,\n    cellCeilingV,cellHeadroomV,packCeilingV,packHeadroomV,bmsCclLimited,\n    veryPoorStage,veryPoorRaiseReason,veryPoorNominalRaiseHour:cfg.veryPoorNominalRaiseHour,\n    energyNeededTo100Kwh,marginTo100,boostReason,\n    forceActive,forceMinutesLeft,forceRequestedA:forceActive?strategyA:0,forceUntil:forceActive?forceUntil:0,\n    batteryCapacityKwh:cfg.batteryCapacityKwh,batteryEnergyNeededKwh,\n    remainingTodayP10:remainingP10,remainingTodayP50:remainingP50,remainingTodayP90:remainingP90,\n    conservativeSolarRemainingKwh,conservativeSolarSource,usableSolarForBatteryKwh,energyMargin,energyDecision,\n    batteryV:battV,batteryVFiltered:battVFiltered,batteryI:battI,\n    gridL1W:g1,gridL2W:g2,gridL3W:g3,gridTotalW,gridTotalFilteredW,netExportW,netExportFilteredW,netImportW,\n    gridGuard:guard,gridEquivalentA,gridGuardCalculatedA:guardCalculatedA,gridGuardTripSamples:trip,gridGuardReleaseSamples:release,\n    forecastValid,\n    tomorrowForecastDataValid:tomorrowDataValid,remainingForecastDataValid:remainingDataValid,powerForecastDataValid:powerDataValid,\n    tomorrowForecastValid:tomorrowValid,remainingForecastValid:remainingValid,powerForecastValid:powerValid,\n    tomorrowForecastAgeMin:tomorrowAgeMin,remainingForecastAgeMin:remainingAgeMin,powerForecastAgeMin:powerAgeMin,\n    tomorrowForecastMaxAgeMin:Number(cfg.tomorrowForecastMaxAgeMs||0)/60000,\n    remainingForecastMaxAgeMin:Number(cfg.remainingForecastMaxAgeMs||0)/60000,\n    powerForecastMaxAgeMin:Number(cfg.powerForecastMaxAgeMs||0)/60000,\n    forecastClass,tomorrowP10:p10,tomorrowP50:p50,tomorrowP90:p90,\n    confidence,forecastSpreadKwh:spreadKwh,forecastSpreadPctOfP50:spreadPct,\n    powerNowW:powerNow,power30mW:power30,power1hW:power1h,upcomingPowerW:upcomingPower,solarOpportunity,\n    dcFeedInEnabled:overFeed===1,\n    note:overFeed===1?\"DC feed-in activ: limita DVCC poate sa nu limiteze complet MPPT-ul DC. Monitorizeaza separat.\":\"\"\n};\nstatus.plan={soc,targetSoc,forecastTargetSoc,finalTargetSoc,forecastClass,veryPoorStage,veryPoorRaiseReason,\n    energyNeededToTargetKwh:batteryEnergyNeededKwh,\n    energyNeededTo100Kwh:Math.max(0,cfg.batteryCapacityKwh*(100-soc)/100/cfg.chargeEfficiency),\n    conservativeSolarRemainingKwh,usableSolarForBatteryKwh,energyMargin,marginTo100,\n    nominalRaiseHour:cfg.veryPoorNominalRaiseHour,latestSafeStart:null};\nflow.set(\"controller_status\",status);\n\nlet fill=guard?\"red\":blocked?\"yellow\":enabled?\"green\":\"grey\";\nlet shape=enabled?\"dot\":\"ring\";\nconst marginTxt=energyMargin===null?\"-\":energyMargin.toFixed(1)+\"x\";\nlet txt=`${enabled?\"ON\":\"DRY\"} | SOC ${soc.toFixed(1)}→${targetSoc}% | ${desiredA}A | ${batteryTaperSource} | Grid ${Math.round(gridTotalW)}W`;\nif(forceActive)txt=`FORCE ${forceMinutesLeft}m | req ${strategyA}A→${desiredA}A | SOC ${soc.toFixed(1)}% | Grid ${Math.round(gridTotalW)}W`;\nif(guard)txt=`NET GRID GUARD | ${desiredA}A | GridNET ${Math.round(gridTotalW)}W`;\nelse if(batteryAwareCapA<strategyA)txt=`BATTERY CAP ${batteryTaperSource} | ${strategyA}A→${desiredA}A | SOC ${soc.toFixed(1)}%`;\nnode.status({fill,shape,text:txt});\n\nconst lastStatus=Number(flow.get(\"last_status_ts\")||0);\nlet dbg=null;\nif((enabled&&mustSend)||Date.now()-lastStatus>=cfg.statusEveryMs){dbg={payload:status};flow.set(\"last_status_ts\",Date.now());}\nreturn [out,dbg];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 540,
+    "y": 760,
+    "wires": [
+      [
+        "v282_charge_guard"
+      ],
+      [
+        "3f4cf1cfa63349cf"
+      ]
+    ]
+  },
+  {
+    "id": "a7e07b9d5ed54616",
+    "type": "victron-output-ess",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.settings",
+    "path": "/Settings/SystemSetup/MaxChargeCurrent",
+    "serviceObj": {
+      "service": "com.victronenergy.settings",
+      "name": "Venus settings",
+      "communityTag": "ess"
+    },
+    "pathObj": {
+      "path": "/Settings/SystemSetup/MaxChargeCurrent",
+      "type": "float",
+      "name": "DVCC Charge current limit (A)",
+      "mode": "both"
+    },
+    "initial": "",
+    "name": "DVCC MaxChargeCurrent — ONLY WRITER",
+    "onlyChanges": true,
+    "outputs": 0,
+    "conditionalMode": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "debounce": "",
+    "x": 900,
+    "y": 740,
+    "wires": []
+  },
+  {
+    "id": "3f4cf1cfa63349cf",
+    "type": "debug",
+    "z": "cbb68a3d67f841a3",
+    "name": "Controller status",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 890,
+    "y": 800,
+    "wires": []
+  },
+  {
+    "id": "79e1e21bb9744104",
+    "type": "inject",
+    "z": "cbb68a3d67f841a3",
+    "name": "DRY RUN / disable output",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "false",
+    "payloadType": "bool",
+    "x": 190,
+    "y": 860,
+    "wires": [
+      [
+        "1f0131928a124050"
+      ]
+    ]
+  },
+  {
+    "id": "4af73ac2efe64cf0",
+    "type": "inject",
+    "z": "cbb68a3d67f841a3",
+    "name": "ENABLE CONTROL",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "true",
+    "payloadType": "bool",
+    "x": 180,
+    "y": 900,
+    "wires": [
+      [
+        "1f0131928a124050"
+      ]
+    ]
+  },
+  {
+    "id": "1f0131928a124050",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "Set controller enable",
+    "func": "const cfg=flow.get(\"solar_cfg\");if(!cfg)return null;\nconst enabled=msg.payload===true;\nflow.set(\"controller_enabled\",enabled);flow.set(\"writer_state\",{});flow.set(\"pause_until\",0);\nif(!enabled){flow.set(\"force_until\",0);flow.set(\"manual_target\",null);}\nnode.status({fill:enabled?\"green\":\"grey\",shape:\"dot\",text:enabled?\"CONTROL ON\":\"DRY RUN: limita DVCC existenta ramane\"});\nreturn {payload:Date.now()};",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 460,
+    "y": 880,
+    "wires": [
+      [
+        "c6ab3c4a488844e7"
+      ]
+    ]
+  },
+  {
+    "id": "8fc10177969c4fb9",
+    "type": "inject",
+    "z": "cbb68a3d67f841a3",
+    "name": "RESET controller state",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 190,
+    "y": 950,
+    "wires": [
+      [
+        "633aa0dff8ae42f3"
+      ]
+    ]
+  },
+  {
+    "id": "633aa0dff8ae42f3",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "Reset state",
+    "func": "flow.set(\"grid_guard\", false);\nflow.set(\"grid_guard_hits\", 0);\nflow.set(\"grid_release_hits\", 0);\nflow.set(\"charge_blocked\", false);\nflow.set(\"last_dvcc_sent\", null);\nflow.set(\"last_status_ts\", 0);\nflow.set(\"grid_total_filtered\", null);\nflow.set(\"grid_total_filtered_ts\", 0);\nflow.set(\"battery_voltage_filtered\", null);\nflow.set(\"battery_voltage_filtered_ts\", 0);\nflow.set(\"bms_max_cell_filtered\", null);\nflow.set(\"bms_max_cell_filtered_ts\", 0);\nflow.set(\"bms_temp_filtered\", null);\nflow.set(\"bms_temp_filtered_ts\", 0);\nnode.status({fill:\"blue\", shape:\"ring\", text:\"Controller v2.7.1 state reset\"});\nflow.set(\"writer_fault\",null);flow.set(\"writer_state\",{});flow.set(\"manual_target\",null);flow.set(\"force_until\",0);flow.set(\"pause_until\",0);return {payload:Date.now()};\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 950,
+    "wires": [
+      [
+        "c6ab3c4a488844e7"
+      ]
+    ]
+  },
+  {
+    "id": "b0eade22971a4410",
+    "type": "global-config",
+    "env": [],
+    "modules": {
+      "@victronenergy/node-red-contrib-victron": "1.6.64"
+    }
+  },
+  {
+    "id": "d73f93e41c7e488f",
+    "type": "comment",
+    "z": "cbb68a3d67f841a3",
+    "name": "Telegram v2.8.4 — informare, target, pause, force100, alerte, raport",
+    "info": "Vezi /help si notele de instalare.",
+    "x": 510,
+    "y": 1120,
+    "wires": []
+  },
+  {
+    "id": "0911a661669f4754",
+    "type": "inject",
+    "z": "cbb68a3d67f841a3",
+    "name": "Telegram poll / 10 sec",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "10",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 160,
+    "y": 1180,
+    "wires": [
+      [
+        "4606f0e900dd4c3d"
+      ]
+    ]
+  },
+  {
+    "id": "4606f0e900dd4c3d",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "Telegram poll request",
+    "func": "const cfg=flow.get(\"solar_cfg\");if(!cfg||cfg.telegramEnabled!==true)return null;\nconst token=String(cfg.telegramBotToken||\"\").trim();\nif(!token||token.includes(\"PASTE_\")){node.status({fill:\"yellow\",shape:\"ring\",text:\"Configureaza token Telegram\"});return null;}\nconst now=Date.now(),busy=flow.get(\"telegram_inflight\");\nif(now<Number(flow.get(\"telegram_poll_backoff\")||0))return null;\nif(busy&&now-busy.ts<12000)return null;\nconst id=String(now)+\"-\"+String(Math.random());flow.set(\"telegram_inflight\",{id,ts:now});\nconst offset=Number(flow.get(\"telegram_update_offset\")||0);\nreturn {url:\"https://api.telegram.org/bot\"+token+\"/getUpdates?timeout=0&limit=100&allowed_updates=%5B%22message%22%5D\"+(offset>0?\"&offset=\"+offset:\"\"),requestTimeout:8000,telegram_poll_id:id};\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 1180,
+    "wires": [
+      [
+        "295fddac1bc14b30"
+      ]
+    ]
+  },
+  {
+    "id": "295fddac1bc14b30",
+    "type": "http request",
+    "z": "cbb68a3d67f841a3",
+    "name": "Telegram getUpdates",
+    "method": "GET",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 640,
+    "y": 1180,
+    "wires": [
+      [
+        "3ca0cc8bcdab4019"
+      ]
+    ]
+  },
+  {
+    "id": "3ca0cc8bcdab4019",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "Telegram authorize + ordered commands",
+    "func": "const cfg=flow.get(\"solar_cfg\");if(!cfg||cfg.telegramEnabled!==true)return null;\nconst busy=flow.get(\"telegram_inflight\");\nif(msg.telegram_poll_id&&busy&&msg.telegram_poll_id!==busy.id)return null;\nflow.set(\"telegram_inflight\",null);\nif(!msg.payload||msg.payload.ok!==true){\n const code=Number(msg.payload?.error_code||msg.statusCode||0);\n flow.set(\"telegram_poll_ok\",false);flow.set(\"telegram_error_code\",code);\n const retry=Number(msg.payload?.parameters?.retry_after||0);\n flow.set(\"telegram_poll_backoff\",Date.now()+Math.max(10000,Math.min(3600000,retry*1000)));\n node.status({fill:\"red\",shape:\"ring\",text:code===409?\"409: alt poller sau webhook\":\"Telegram API \"+code});return null;\n}\nflow.set(\"telegram_poll_ok\",true);flow.set(\"telegram_poll_ts\",Date.now());flow.set(\"telegram_error_code\",null);\nconst updates=Array.isArray(msg.payload.result)?msg.payload.result:[];\nlet offset=Number(flow.get(\"telegram_update_offset\")||0);\nconst out=[],now=Math.floor(Date.now()/1000),start=Number(flow.get(\"telegram_session_start\")||now);\nconst allowed=new Set([\"/discharge\",\"/cells\",\"/start\",\"/help\",\"/status\",\"/battery\",\"/grid\",\"/phases\",\"/forecast\",\"/tomorrow\",\"/today\",\"/ess\",\"/plan\",\"/why\",\"/limits\",\"/health\",\"/force\",\"/forceoff\",\"/target\",\"/pause\",\"/resume\",\"/force100\",\"/alerts\",\"/report\"]);\nfor(const u of updates.slice().sort((a,b)=>a.update_id-b.update_id)){\n const id=Number(u?.update_id);if(!Number.isSafeInteger(id)||id<offset)continue;offset=id+1;\n const m=u.message;\n if(!m||String(m.chat?.id)!==String(cfg.telegramChatId)||m.from?.is_bot)continue;\n const age=now-Number(m.date);\n if(!Number.isFinite(age)||age< -30||age>cfg.telegramCommandMaxAgeSec||Number(m.date)<start)continue;\n const parts=String(m.text||\"\").trim().split(/\\s+/);\n if(!parts[0].startsWith(\"/\"))continue;\n const t=parts[0].toLowerCase().split(\"@\");\n if(t[1]&&t[1]!==String(cfg.telegramBotUsername||\"\").replace(/^@/,\"\").toLowerCase())continue;\n out.push({telegram_command:allowed.has(t[0])?t[0]:\"/help\",telegram_args:parts.slice(1),telegram_chat_id:String(m.chat.id),\n telegram_private_owner:m.chat.type===\"private\"&&String(m.from?.id)===String(cfg.telegramChatId),telegram_received_at:Date.now()});\n}\nflow.set(\"telegram_update_offset\",offset);\nnode.status({fill:\"green\",shape:\"ring\",text:out.length?out.length+\" comenzi\":\"idle\"});return out.length?[out]:null;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 910,
+    "y": 1180,
+    "wires": [
+      [
+        "91b32ad72f6b4bae"
+      ]
+    ]
+  },
+  {
+    "id": "91b32ad72f6b4bae",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "Telegram commands + replies",
+    "func": "const cfg=flow.get(\"solar_cfg\");if(!cfg||cfg.telegramEnabled!==true)return [null,null];\nconst internal=msg.telegram_internal===true;\nif(!internal&&String(msg.telegram_chat_id)!==String(cfg.telegramChatId))return [null,null];\nconst now=Date.now(),s=flow.get(\"controller_status\"),h=flow.get(\"controller_health\");\nconst args=Array.isArray(msg.telegram_args)?msg.telegram_args:[];\nconst cmd=msg.telegram_command||\"/help\";\nconst enabled=flow.get(\"controller_enabled\")===true,paused=Number(flow.get(\"pause_until\")||0)>now;\nconst mode=!enabled?\"DRY RUN\":paused?\"PAUZA\":\"CONTROL ON\";\nfunction num(v){if(v===null||v===undefined||typeof v===\"boolean\"||String(v).trim()===\"\")return null;const x=Number(v);return Number.isFinite(x)?x:null;}\nfunction n(v,d=0){const x=num(v);return x===null?\"N/A\":x.toFixed(d);}\nfunction flag(v){return v===true?\"DA\":v===false?\"NU\":\"N/A\";}\nfunction fresh(k,ttl=cfg.liveMaxAgeMs){const ts=Number(flow.get(k+\"_ts\")||0);return ts>0&&now-ts>=0&&now-ts<=ttl&&num(flow.get(k))!==null&&!(flow.get(\"source_faults\")||{})[k];}\nfunction v(k,ttl){return fresh(k,ttl)?flow.get(k):null;}\nfunction age(k){const ts=Number(flow.get(k)||0);return ts>0?n((now-ts)/1000)+\" s\":\"N/A\";}\nfunction time(ts){return ts?new Date(ts).toLocaleString(\"ro-RO\",{timeZone:cfg.timeZone,hour:\"2-digit\",minute:\"2-digit\",day:\"2-digit\",month:\"2-digit\"}):\"N/A\";}\nfunction left(ts){return Math.max(0,Math.ceil((Number(ts||0)-now)/60000));}\nfunction day(){const p=Object.fromEntries(new Intl.DateTimeFormat(\"en-CA\",{timeZone:cfg.timeZone,year:\"numeric\",month:\"2-digit\",day:\"2-digit\"}).formatToParts(new Date(now)).map(p=>[p.type,p.value]));return p.year+\"-\"+p.month+\"-\"+p.day;}\nfunction event(kind,detail){const q=flow.get(\"controller_events\")||[];q.push({kind,detail,ts:now});flow.set(\"controller_events\",q.slice(-40));}\nfunction whole(x,min,max){return typeof x===\"string\"&&/^\\d+$/.test(x)&&Number(x)>=min&&Number(x)<=max;}\nfunction forceText(){const until=flow.get(\"force_until\");return until>now?n(flow.get(\"force_current_a\"))+\" A / \"+left(until)+\" min\":\"OFF\";}\nconst statusFresh=!!s&&s.timestamp>0&&now-s.timestamp<=cfg.telegramStatusMaxAgeMs;\nconst required=[\"bms_max_cell\",\"bms_min_cell\",\"soc\",\"battery_voltage\",\"battery_current\",\"grid_l1\",\"grid_l2\",\"grid_l3\",\"bms_connected\",\"bms_ccl\",\"bms_cvl\",\"dvcc_actual\"];\nconst healthy=statusFresh&&h?.ok===true&&now-h.timestamp<=cfg.telegramStatusMaxAgeMs&&required.every(k=>fresh(k,k.startsWith(\"bms_\")?cfg.bmsMaxAgeMs:k===\"dvcc_actual\"?cfg.dvccReadbackMaxAgeMs:cfg.liveMaxAgeMs));\nconst mutations=new Set([\"/discharge\",\"/force\",\"/forceoff\",\"/target\",\"/pause\",\"/resume\",\"/force100\",\"/alerts\",\"/report\"]);\nlet text=\"\",tick=false,kind=\"reply\",reportDay=null;\nfunction rejectControl(){if(cmd!==\"/discharge\"&&(flow.get(\"discharge_request\")||flow.get(\"discharge_cancel\")||(flow.get(\"discharge_bridge\")||{}).active))return \"Opreste mai intai descarcarea cu /discharge off.\";if(!enabled)return \"Comanda refuzata: DRY RUN. Activeaza controlul local in Node-RED.\";if(paused)return \"Comanda refuzata: control in pauza. Foloseste /resume.\";if(!healthy)return \"Comanda refuzata: date lipsa/vechi sau eroare DVCC. Verifica /health.\";return null;}\nfunction dischargeText(){\n const d=flow.get('discharge_bridge');\n if(!d||now-d.timestamp>15000)return 'DESCARCARE: helper fara raspuns recent. Nu se poate porni. Verifica instalarea.';\n return `DESCARCARE ${d.active?'ACTIVA':'OPRITA'}\\nStare: ${d.reason||'N/A'}; eroare: ${d.requestError||d.error||'niciuna'}\\nCurent cerut/efectiv: ${n(d.amps,1)} / ${n(d.currentA,1)} A DC\\nSOC ${n(d.soc,1)}%; oprire ${n(d.effectiveStopSoc??d.stopSoc,1)}%\\nTimp ramas ${n(d.remainingSec)} s\\nNET ${n(d.gridW)} W; setpoint temporar ${n(d.setpointW)} W\\n/discharge A minute [SOC]\\n/discharge A soc SOC (max 120 min)\\n/discharge off\\nLa oprire revine ESS normal, nu se blocheaza descarcarea pentru consumatori.`;\n}\nfunction cellGuardText(){\n const g=flow.get(\"charge_guard\");\n if(!g||now-g.timestamp>10000)return \"Protectie celule: date indisponibile/vechi.\";\n return `Protectie celule: ${g.reason}; plafon ${n(g.capA)} A\\nMax/min brut: ${n(g.maxV,3)}/${n(g.minV,3)} V; delta ${n(g.deltaV===null?null:g.deltaV*1000,1)} mV\\nStop memorat: ${flag(g.blocked)}; telemetrie valida: ${flag(g.valid)}\\nStop la max >=3.500 V sau delta >=100 mV cu max >=3.400 V.\\nReluare: max <=3.430 V si delta <=50 mV, stabile 60 s.\\nSOC >=90%: plafon 10 A, scade spre 2 A la 98%.\\nPlafon temporar 10 A: ${cfg.commissioningChargeCapEnabled===true?\"ACTIV\":\"INACTIV\"}.`;\n}\nfunction forecastText(){\n if(!s)return \"Prognoza indisponibila.\";\n return `Maine P10/P50/P90: ${n(s.tomorrowP10,1)} / ${n(s.tomorrowP50,1)} / ${n(s.tomorrowP90,1)} kWh\\nIncredere euristica: ${n(num(s.confidence)===null?null:s.confidence*100)}% (nu probabilitate calibrata)\\nSpread P90-P10: ${n(s.forecastSpreadKwh,1)} kWh / ${n(num(s.forecastSpreadPctOfP50)===null?null:s.forecastSpreadPctOfP50*100)}% din P50\\nClasa: ${s.forecastClass||\"N/A\"}\\nTinta forecast: ${n(s.forecastTargetSoc)}%; tinta activa: ${n(s.targetSoc)}%\\nFresh: ${flag(s.tomorrowForecastValid)}; varsta: ${n(s.tomorrowForecastAgeMin)} min / max ${n(s.tomorrowForecastMaxAgeMin)} min\\nVERY_POOR: ${s.veryPoorStage||\"N/A\"} / ${s.veryPoorRaiseReason||\"N/A\"}`;\n}\nfunction todayText(){\n const d=flow.get(\"daily_energy\"),today=day();\n const valid=!!d&&d.day===today&&now-d.fetchedAt<=cfg.haDailyMaxAgeMs;\n let text=\"Energii AZI (masurate):\\n\";\n for(const [key,label] of [[\"pv\",\"PV total\"],[\"import\",\"Import\"],[\"export\",\"Export\"],[\"charge\",\"Baterie incarcata\"],[\"discharge\",\"Baterie descarcata\"]]){\n  const item=valid?d.values?.[key]:null;\n  const qual=item?.kind==='cumulative-delta'?(item.partial?\" [partial, de la \"+time(item.start)+\"]\":item.estimated?\" [aprox. la miezul noptii]\":\"\"):\"\";\n  text+=label+\": \"+n(item?.kwh,2)+\" kWh\"+qual+(item?.resets?\" [contor resetat]\":\"\")+\"\\n\";\n }\n if(valid&&d.pvSources){for(const pv of d.pvSources)text+=pv.entity+\": \"+n(pv.kwh,2)+\" kWh\\n\";}\n const storage=flow.get(\"energy_storage_status\");\n if(storage==='WRITE_FAILED')text+=\"ATENTIE: energia nu a putut fi salvata pe disc.\\n\";\n const ds=flow.get(\"daily_soc\");\n text+=ds&&ds.day===today?`SOC observat min/max: ${n(ds.min,1)}/${n(ds.max,1)}% de la ${time(ds.start)} (istoric partial; ultimul esantion ${time(ds.last)})\\n`:\"SOC min/max: N/A\\n\";\n text+=`Azi ramas P10/P50/P90: ${n(s?.remainingTodayP10,1)}/${n(s?.remainingTodayP50,1)}/${n(s?.remainingTodayP90,1)} kWh\\nPutere prognozata acum/+30m/+1h: ${n(s?.powerNowW)}/${n(s?.power30mW)}/${n(s?.power1hW)} W\\nRemaining fresh: ${flag(s?.remainingForecastValid)}; varsta ${n(s?.remainingForecastAgeMin)} min\\nPower fresh: ${flag(s?.powerForecastValid)}; varsta ${n(s?.powerForecastAgeMin)} min`;\n return text;\n}\nfunction whyText(){\n if(!s)return \"Controllerul nu are inca date.\";\n const lines=[];\n lines.push(cellGuardText());\n if(!enabled)lines.push(\"DRY RUN: se calculeaza, fara scrieri DVCC.\");\n if(paused)lines.push(\"Pauza: nu se scrie DVCC; ultima setare ramane in Victron.\");\n if(s.health?.faults?.length)lines.push(\"Watchdog: \"+s.health.faults.join(\", \")+\". Cerere de siguranta 0 A cand controlul poate scrie.\");\n if(s.manualTargetActive)lines.push(`Tinta ${s.targetSource}: ${n(s.targetSoc)}%, expira ${time(s.manualTarget?.until)}.`);\n else{\n  if(!s.tomorrowForecastValid)lines.push(`Prognoza maine lipseste/este veche: fallback la ${cfg.normalTargetSoc}%.`);\n  else lines.push(`Clasa ${s.forecastClass}: P50 ${n(s.tomorrowP50,1)} kWh; praguri ${cfg.veryPoorTomorrowKwh}/${cfg.poorTomorrowKwh}/${cfg.mediumTomorrowKwh} kWh. Tinta ${n(s.targetSoc)}%.`);\n  if(String(s.forecastClass).includes(\"UNCERTAIN\"))lines.push(\"Incredere euristica mica: tinta automata a fost majorata cu 5 puncte.\");\n  if(s.veryPoorStage===\"HOLD_90\")lines.push(`VERY_POOR: mentinere la ${cfg.veryPoorHoldSoc}% pentru a reduce timpul la 100%. Marja pana la 100% ${n(s.marginTo100,2)}x, prag ${cfg.veryPoorEarlyTriggerMargin}x.`);\n  if(s.veryPoorStage===\"FINAL_100\"){\n   const reasons={NOMINAL_TIME:\"a sosit ora nominala\",EARLY_ENERGY_RISK:\"energia ramasa nu mai permite amanarea cu marja ceruta\",REMAINING_FORECAST_STALE:\"prognoza ramasa azi nu mai este proaspata\",ALREADY_FULL:\"SOC este deja aproape de 100%\"};\n   lines.push(\"VERY_POOR ridicare la 100%: \"+(reasons[s.veryPoorRaiseReason]||s.veryPoorRaiseReason)+\".\");\n  }\n }\n if(s.forceActive)lines.push(\"FORCE de curent: ignora temporar target/forecast; taper si Grid Guard raman active.\");\n else if(s.blocked)lines.push(`Tinta atinsa; histerezis ${cfg.socHysteresis} puncte SOC inainte de reluare.`);\n lines.push(`Strategie: ${s.energyDecision||\"N/A\"}; boost: ${s.boostReason||\"NONE\"}.`);\n if(s.bmsCclLimited)lines.push(`CCL BMS limiteaza la ${n(s.bmsCcl)} A.`);\n if(s.batteryAwareCapA<s.strategyA)lines.push(`Taper: ${s.batteryTaperReason}, plafon ${n(s.batteryAwareCapA)} A.`);\n if(s.gridGuard)lines.push(`Grid Guard activ la NET ${n(s.gridTotalW)} W; limita calculata ${n(s.gridGuardCalculatedA)} A.`);\n if(s.targetSource===\"FORCE100\")lines.push(`FORCE100 pastreaza politica 50/70/100 A si plafonul solar instantaneu ${n(s.solarOnlyCapA)} A.`);\n lines.push(`Plafon calculat ${n(s.desiredA)} A; DVCC citit ${n(s.dvccActualA)} A; curent real ${n(s.batteryI,1)} A. Plafonul nu cere un curent obligatoriu.`);\n return lines.join(\"\\n\");\n}\nif(internal){\n if(cmd===\"__alert\"){if(flow.get(\"alerts_enabled\")!==true)return [null,null];text=String(msg.telegram_event_text||\"\");kind=\"alert\";}\n else if(cmd===\"__report\"){if(flow.get(\"report_enabled\")!==true)return [null,null];text=`RAPORT DE SEARA — ${day()}\\n${mode}; SOC ${n(s?.soc,1)}%\\n${todayText()}\\n\\n${forecastText()}\\n\\nDECIZIE\\n${whyText()}`;kind=\"report\";reportDay=msg.telegram_report_day;}\n else return [null,null];\n}else if(mutations.has(cmd)&&!msg.telegram_private_owner){text=\"Comanda permisa numai proprietarului, in chatul privat autorizat.\";}\nelse if(cmd===\"/discharge\"){\n const d=flow.get('discharge_bridge');\n if(args.length===0||args.length===1&&args[0].toLowerCase()==='status'){\n  text=dischargeText();\n }else if(args.length===1&&args[0].toLowerCase()==='off'){\n  flow.set('discharge_request',null);flow.set('discharge_cancel',true);tick=true;\n  text='Cerere de oprire trimisa. Confirma IDLE/MANUAL_OR_CONTROLLER_STOP prin /discharge status. ESS revine la functionarea normala.';\n }else{\n  const bySoc=args.length===3&&args[1].toLowerCase()==='soc';\n  const amps=Number(args[0]),minutes=bySoc?120:Number(args[1]),stopSoc=bySoc?Number(args[2]):args.length===3?Number(args[2]):30;\n  const syntax=(bySoc||args.length===2||args.length===3)&&whole(args[0],1,50)&&\n    (bySoc?whole(args[2],20,95):whole(args[1],1,240)&&(args.length===2||whole(args[2],20,95)));\n  const reject=rejectControl();\n  if(!syntax)text='Folosire: /discharge A minute [SOC] sau /discharge A soc SOC. 1-50 A DC, 1-240 minute, SOC 20-95%. Fara SOC explicit: 30%. Modul soc are limita de timp 120 min.';\n  else if(reject)text=reject;\n  else if(!d?.boot||!d.ok||now-d.timestamp>15000||d.restoring)text='Refuzat: watchdog local indisponibil sau in eroare. Vezi /discharge status; instaleaza bridge.py cu install.sh.';\n  else if(d.active||flow.get('discharge_request')||flow.get('discharge_cancel'))text='Exista o sesiune/oprire in curs. /discharge off, apoi verifica status.';\n  else if(num(s?.soc)===null||stopSoc>=s.soc-0.5)text='SOC de oprire trebuie sa fie sub SOC actual.';\n  else{\n   const id=now.toString(36)+'-'+Math.random().toString(36).slice(2);\n   flow.set('discharge_request',{id,boot:d.boot,amps,minutes,stopSoc,issuedAt:now/1000,instance:cfg.bmsDeviceInstance});\n   flow.set('force_until',0);flow.set('force_current_a',0);flow.set('manual_target',null);\n   tick=true;text=`Cerere: ${amps} A din baterie, maximum ${minutes} min, oprire la SOC ${stopSoc}% sau limita ESS daca este mai mare. Asteapta confirmarea RUNNING in /discharge status. Curentul este reglat aproximativ, nu garantat. FORCE si tinta manuala anulate.`;\n  }\n }\n}\n\nelse if(cmd===\"/cells\"){text=cellGuardText();}\nelse if(cmd===\"/target\"||cmd===\"/force100\"){\n if(cmd===\"/target\"&&args.length===1&&args[0].toLowerCase()===\"auto\"){\n  flow.set(\"manual_target\",null);flow.set(\"force_until\",0);flow.set(\"force_current_a\",0);tick=true;event(\"TARGET_AUTO\",\"Tinta automata restabilita; override-ul de curent a fost anulat.\");text=\"Tinta revine la forecast. FORCE de curent anulat. Protectiile raman active.\";\n }else if(cmd===\"/target\"&&args.length===0){const m=flow.get(\"manual_target\");text=m&&m.until>now?`Tinta manuala ${m.soc}%, ${left(m.until)} min ramase. /target auto pentru anulare.`:`Tinta automata. Folosire: /target 92 [minute]. Implicit ${cfg.targetDefaultMinutes} min.`;}\n else{\n  const solar=cmd===\"/force100\",soc=solar?100:Number(args[0]);\n  const minutes=solar?(args.length?Number(args[0]):cfg.targetDefaultMinutes):(args.length===2?Number(args[1]):cfg.targetDefaultMinutes);\n  const valid=solar?(args.length<=1&&(!args.length||whole(args[0],1,cfg.targetMaxMinutes))):(args.length>=1&&args.length<=2&&whole(args[0],cfg.targetMinSoc,cfg.targetMaxSoc)&&(args.length===1||whole(args[1],1,cfg.targetMaxMinutes)));\n  if(!valid)text=`Parametri invalidi. /target ${cfg.targetMinSoc}..${cfg.targetMaxSoc} [minute] sau /force100 [minute]; durata 1..${cfg.targetMaxMinutes}.`;\n  else if(rejectControl())text=rejectControl();\n  else{\n   const m={soc,until:now+minutes*60000,solarOnly:solar};flow.set(\"manual_target\",m);flow.set(\"force_until\",0);flow.set(\"force_current_a\",0);tick=true;\n   event(\"TARGET_ON\",`${solar?\"FORCE100 solar\":\"Tinta manuala\"}: ${soc}% / ${minutes} min.`);\n   text=`${solar?\"FORCE100 solar\":\"Tinta manuala\"}: ${soc}%, expira ${time(m.until)}.\\nNu schimba ESS sau limita de descarcare. FORCE de curent anulat. BMS, taper si NET Grid Guard raman active.\\n${solar?\"Nu inseamna 100 A. Se aplica si un plafon calculat din surplusul NET; sunt posibile tranzitorii intre esantioane.\":\"Politica de curent ramane automata; nu se programeaza incarcare din retea.\"}\\n/target auto pentru anulare.`;\n  }\n }\n}else if(cmd===\"/pause\"){\n if(args.length!==1||!whole(args[0],1,cfg.pauseMaxMinutes))text=`Folosire: /pause <minute>, intre 1 si ${cfg.pauseMaxMinutes}.`;\n else if(!enabled)text=\"Controllerul este deja in DRY RUN. /pause nu activeaza controlul.\";\n else{\n  flow.set(\"pause_until\",now+Number(args[0])*60000);flow.set(\"force_until\",0);flow.set(\"force_current_a\",0);tick=true;\n  event(\"PAUSE_ON\",`Pauza ${args[0]} min; FORCE de curent anulat.`);\n  text=`Scrierile DVCC sunt suspendate ${args[0]} minute.\\nUltima limita DVCC ramane aplicata. Nu este o comanda de oprire a incarcarii. ESS/BMS continua independent. Timerul tintei manuale continua sa curga.\\n/resume reia controlul.`;\n }\n}else if(cmd===\"/resume\"){\n if(args.length)text=\"Folosire: /resume\";\n else if(!enabled)text=\"DRY RUN: activeaza controlul local in Node-RED. /resume nu il activeaza.\";\n else{flow.set(\"pause_until\",0);flow.set(\"writer_state\",{});tick=true;event(\"RESUME\",\"Control automat reluat; verificarile de telemetrie raman active.\");text=\"Pauza anulata. Controlul se recalculeaza imediat; o eroare de telemetrie impune 0 A. Erorile DVCC blocate necesita RESET local.\";}\n}else if(cmd===\"/force\"){\n const minutes=Number(args[0]),amps=args.length===1?cfg.forceDefaultA:Number(args[1]);\n const valid=args.length>=1&&args.length<=2&&whole(args[0],cfg.forceMinMinutes,cfg.forceMaxMinutes)&&(args.length===1||whole(args[1],1,Math.min(cfg.forceMaxA,cfg.hardMaxA)));\n if(!valid)text=`Folosire: /force 15 [A]. Durata ${cfg.forceMinMinutes}-${cfg.forceMaxMinutes} min; plafon 1-${Math.min(cfg.forceMaxA,cfg.hardMaxA)} A.`;\n else if(rejectControl())text=rejectControl();\n else if(!(s.bmsCcl>0))text=\"FORCE refuzat: CCL BMS nu permite incarcare.\";\n else{flow.set(\"manual_target\",null);flow.set(\"force_until\",now+minutes*60000);flow.set(\"force_current_a\",amps);tick=true;event(\"FORCE_ON\",`FORCE ${amps} A / ${minutes} min.`);text=`FORCE de curent: plafon ${amps} A / ${minutes} min.\\nTinta manuala/FORCE100 anulate. Target SOC si forecast sunt ignorate temporar. BMS, taper si NET Grid Guard raman active. Curentul real poate fi mai mic.\\n/forceoff pentru anulare.`;}\n}else if(cmd===\"/forceoff\"){\n if(args.length)text=\"Folosire: /forceoff\";\n else{flow.set(\"force_until\",0);flow.set(\"force_current_a\",0);tick=true;event(\"FORCE_OFF\",\"FORCE de curent anulat.\");text=\"FORCE de curent anulat. FORCE100 se anuleaza separat cu /target auto.\";}\n}else if(cmd===\"/alerts\"){\n if(args.length!==1||![\"on\",\"off\"].includes(args[0].toLowerCase()))text=\"Folosire: /alerts on sau /alerts off\";\n else{const on=args[0].toLowerCase()===\"on\";flow.set(\"alerts_enabled\",on);flow.set(\"telegram_alert_state\",null);flow.set(\"controller_events\",[]);text=`Alerte automate ${on?\"ON\":\"OFF\"}. Snapshot nou, fara notificari istorice.`;}\n}else if(cmd===\"/report\"){\n const clock=/^([01]\\d|2[0-3]):[0-5]\\d$/;\n const op=String(args[0]||\"\").toLowerCase();\n if(op===\"now\"&&args.length===1)text=`RAPORT LA CERERE — ${day()}\\n${mode}; SOC ${n(s?.soc,1)}%\\n${todayText()}\\n\\n${forecastText()}\\n\\n${whyText()}`;\n else if(op===\"off\"&&args.length===1){flow.set(\"report_enabled\",false);text=\"Raport automat OFF.\";}\n else if(op===\"on\"&&(args.length===1||(args.length===2&&clock.test(args[1])))){\n  if(args.length===2)flow.set(\"report_time\",args[1]);flow.set(\"report_enabled\",true);flow.set(\"report_armed_at\",now);text=`Raport automat ON la ${flow.get(\"report_time\")} (${cfg.timeZone}). Fara recuperare retroactiva; /report now pentru raport imediat.`;\n }else if(args.length===0)text=`Raport: ${flow.get(\"report_enabled\")?\"ON\":\"OFF\"} la ${flow.get(\"report_time\")} (${cfg.timeZone}).\\n/report on [HH:MM]\\n/report off\\n/report now`;\n else text=\"Folosire: /report on [HH:MM], /report off sau /report now\";\n}else if(cmd===\"/help\"||cmd===\"/start\"){\n text=`VICTRON SOLAR v2.8.4\\n\\nINFORMARE\\n/status /battery /grid /phases\\n/forecast /tomorrow /today\\n/plan /why /limits /ess /health\\n\\nTINTA SI PAUZA\\n/target 92 [minute] — tinta temporara\\n/target auto — revine la forecast, anuleaza FORCE\\n/force100 [minute] — tinta 100%, plafon solar\\nDurata implicita tinta: ${cfg.targetDefaultMinutes} min\\n/pause 30 — suspenda scrierile, pastreaza limita existenta\\n/resume — reia controlul deja activ local\\n\\nFORCE CURENT\\n/force 15 [A] — ignora temporar targetul\\n/forceoff — anuleaza FORCE de curent\\n\\nALERTE / RAPOARTE\\n/alerts on | /alerts off\\n/report on [HH:MM] | /report off\\n/report now\\n\\nComenzile de modificare: numai proprietarul in chat privat. BMS, taper si NET Grid Guard au prioritate cand controllerul scrie. /pause suspenda toate scrierile controllerului, inclusiv Grid Guard; BMS/ESS raman independente. /force100 nu inseamna 100 A.`;\n}else if(cmd===\"/health\"){\n text=`DIAGNOSTIC\\nMod: ${mode}\\nStatus recent: ${flag(statusFresh)}\\nErori: ${(h?.faults||[]).join(\", \")||\"niciuna raportata\"}\\n`;\n for(const k of required)text+=k+\": \"+age(k+\"_ts\")+\"\\n\";\n text+=`Stocare energie: ${flow.get(\"energy_storage_status\")||\"N/A\"}; ultima salvare ${age(\"energy_saved_at\")}\\nDVCC: ${s?.writeState||\"N/A\"}; citit ${n(s?.dvccActualA)} A; cerut ${n(s?.desiredA)} A\\nConfirmare: ${flag(s?.dvccConfirmed)}; incercari ${n(s?.dvccAttempts)}\\nHA: ${flow.get(\"ha_error\")||\"OK/asteptare\"}; ultima reusita ${age(\"ha_success_ts\")}\\nTelegram poll: ${flag(flow.get(\"telegram_poll_ok\"))}; cod ${flow.get(\"telegram_error_code\")||\"-\"}\\nLivrare Telegram: ${flow.get(\"telegram_delivery_error\")||\"fara eroare raportata\"}\\nRaport livrat ultima data: ${flow.get(\"report_last_success\")||\"N/A\"}\\nWatchdog verifica mesaje/conexiuni, nu poate detecta un driver care republica date vechi ca valide. Confirmarea DVCC priveste setarea, nu curentul fizic.`;\n}else if(cmd===\"/ess\"){\n const modeV=v(\"ess_mode\"),bl=v(\"ess_bl_state\"),dcl=v(\"bms_dcl\",cfg.bmsMaxAgeMs),soc=v(\"soc\"),limit=v(\"ess_active_soc\");\n const modes={1:\"Control intern, compensare intre faze activata\",2:\"Control intern, compensare intre faze dezactivata\",3:\"Control extern\"};\n const states={0:\"Dezactivat/vechi\",1:\"BatteryLife initializare\",2:\"BatteryLife autoconsum\",3:\"BatteryLife SOC >85%\",4:\"BatteryLife incarcat\",5:\"Sub limita dinamica SOC\",6:\"Reincarcare fortata BatteryLife\",7:\"Sustain\",8:\"Recharge\",9:\"Keep batteries charged\",10:\"Autoconsum fara BatteryLife\",11:\"Sub SOC minim\",12:\"Recharge fara BatteryLife\"};\n let discharge=\"N/A\";\n if(dcl===0)discharge=\"BMS interzice (DCL=0)\";\n else if(bl===9)discharge=\"ESS Keep charged; nu este modul normal de autoconsum\";\n else if([5,6,7,8,11,12].includes(bl))discharge=\"ESS in stare restrictiva/reincarcare\";\n else if(dcl>0&&[1,2].includes(modeV)&&[2,3,4,10].includes(bl)&&soc!==null&&limit!==null)discharge=soc>limit?\"Conditii citite favorabile (deductie; nu confirmare VE.Bus)\":\"SOC la/sub limita activa\";\n text=`ESS — READ ONLY\\nMod ${n(modeV)}: ${modes[modeV]||\"N/A\"}\\nBatteryLife ${n(bl)}: ${states[bl]||\"N/A\"}\\nSOC minim ${n(v(\"ess_min_soc\"))}%\\nSOC limita BatteryLife ${n(v(\"ess_bl_soc\"))}%\\nSOC limita activa ${n(limit)}%\\nGrid setpoint ${n(v(\"ess_grid_setpoint\"))} W\\nBMS DCL ${n(dcl)} A\\nDescarcare: ${discharge}\\nDC Feed-in: ${v(\"dc_overfeed\")===null?\"N/A\":v(\"dc_overfeed\")===1?\"ON\":\"OFF\"}\\nAceste comenzi nu modifica ESS/BMS.`;\n}else if(cmd===\"/today\"){text=todayText();}\nelse if(!s){text=\"Status indisponibil. Asteapta datele Victron si verifica /health.\";}\nelse if(cmd===\"/tomorrow\"||cmd===\"/forecast\"){text=forecastText();if(cmd===\"/forecast\")text+=\"\\n\\n\"+todayText();}\nelse if(cmd===\"/plan\"){\n const p=s.plan||{};\n text=`PLAN INCARCARE\\nSOC ${n(s.soc,1)}%\\nMaine P10/P50/P90 ${n(s.tomorrowP10,1)}/${n(s.tomorrowP50,1)}/${n(s.tomorrowP90,1)} kWh\\nClasa ${s.forecastClass||\"N/A\"}; sursa tinta ${s.targetSource||\"N/A\"}\\nTinta acum ${n(s.targetSoc)}%; finala ${n(s.finalTargetSoc)}%; forecast ${n(s.forecastTargetSoc)}%\\nVERY_POOR ${s.veryPoorStage||\"N/A\"}; motiv ${s.veryPoorRaiseReason||\"N/A\"}\\nOra nominala ${cfg.veryPoorNominalRaiseHour}:00 (${cfg.timeZone})\\nLatestSafeStart: neimplementat (necesita Solcast pe intervale)\\nNecesar tinta ${n(p.energyNeededToTargetKwh,2)} kWh; pana la 100% ${n(p.energyNeededTo100Kwh,2)} kWh\\nPV conservator ramas ${n(s.conservativeSolarRemainingKwh,2)} kWh (${s.conservativeSolarSource||\"N/A\"})\\nPV utilizabil bateriei ${n(s.usableSolarForBatteryKwh,2)} kWh\\nMarja tinta ${n(s.energyMargin,2)}x; marja 100% ${n(s.marginTo100,2)}x\\nPlafon calculat ${n(s.desiredA)} A; citit DVCC ${n(s.dvccActualA)} A\\nGrid Guard ${flag(s.gridGuard)}\\nFresh maine/ramas/putere ${flag(s.tomorrowForecastValid)}/${flag(s.remainingForecastValid)}/${flag(s.powerForecastValid)}\\nMod ${mode}; FORCE ${forceText()}\\nTinta manuala: ${s.manualTargetActive?time(s.manualTarget?.until):\"OFF\"}\\nPlanul nu garanteaza atingerea SOC.`;\n}else if(cmd===\"/why\"){text=whyText();}\nelse if(cmd===\"/limits\"){\n text=`LIMITE\\nCCL ${n(s.bmsCcl,1)} A; CVL ${n(s.bmsCvl,2)} V; DCL ${n(v(\"bms_dcl\",cfg.bmsMaxAgeMs),1)} A\\nCelula min/max ${n(s.bmsMinCell,3)}/${n(s.bmsMaxCell,3)} V\\nDelta ${n(num(s.cellDeltaV)===null?null:s.cellDeltaV*1000,1)} mV; temperatura ${n(s.bmsTemp,1)} C\\nHeadroom celula ${n(s.cellHeadroomV,3)} V; pack ${n(s.packHeadroomV,2)} V\\nSoft ceiling ${cfg.cellSoftCeilingV} V (taper, nu oprire BMS)\\nStrategie ${n(s.strategyA)} A; plafon baterie ${n(s.batteryAwareCapA)} A\\nHard max ${cfg.hardMaxA} A\\nGrid Guard cap ${n(s.gridGuardCalculatedA)} A\\nPlafon solar FORCE100 ${n(s.solarOnlyCapA)} A\\nAlgoritm final ${n(s.algorithmDesiredA)} A\\nDupa watchdog ${n(s.desiredA)} A\\nUltima scriere ${n(s.dvccLastSentA)} A; DVCC citit ${n(s.dvccActualA)} A\\nConfirmat ${flag(s.dvccConfirmed)}; stare ${s.writeState}\\nDVCC inainte de primul control ${n(flow.get(\"dvcc_before_control\"))} A\\nMotive ${(s.reasonCodes||[]).join(\", \")}\\nCurentul fizic ${n(s.batteryI,1)} A poate fi mai mic. -1 citit DVCC inseamna setare fara limita.`;\n}else if(cmd===\"/battery\"){\n text=`BATERIE\\nSOC ${n(s.soc,1)}% → tinta ${n(s.targetSoc)}%\\n${n(s.batteryV,2)} V / ${n(s.batteryI,1)} A\\nBMS conectat ${flag(s.bmsConnected)}\\nCCL ${n(s.bmsCcl,1)} A; CVL ${n(s.bmsCvl,2)} V\\nCelula min/max ${n(s.bmsMinCell,3)}/${n(s.bmsMaxCell,3)} V\\nDelta ${n(num(s.cellDeltaV)===null?null:s.cellDeltaV*1000,1)} mV\\nTemperatura ${n(s.bmsTemp,1)} C\\nTaper ${s.batteryTaperReason||\"N/A\"}\\nPlafon calculat ${n(s.desiredA)} A; DVCC citit ${n(s.dvccActualA)} A\\nFORCE ${forceText()}`;\n}else if(cmd===\"/grid\"||cmd===\"/phases\"){\n function phase(v){return num(v)===null?\"N/A\":n(v)+\" W \"+(v<0?\"EXPORT\":v>0?\"IMPORT\":\"ECHILIBRU\");}\n text=`RETEA TRIFAZATA\\nL1 ${phase(s.gridL1W)}\\nL2 ${phase(s.gridL2W)}\\nL3 ${phase(s.gridL3W)}\\nNET ${phase(s.gridTotalW)}\\nNET filtrat ${phase(s.gridTotalFilteredW)}\\nGrid Guard ${flag(s.gridGuard)}\\nSemn: + import / - export. Decizia foloseste suma celor 3 faze.`;\n}else{\n text=`VICTRON SOLAR v2.8.4\\n${mode}; pauza ${left(flow.get(\"pause_until\"))} min\\nSOC ${n(s.soc,1)}% → ${n(s.targetSoc)}% (${s.targetSource||\"N/A\"})\\nPlafon ${n(s.desiredA)} A; DVCC citit ${n(s.dvccActualA)} A; confirmat ${flag(s.dvccConfirmed)}\\nCurent real ${n(s.batteryI,1)} A / ${n(s.batteryV,2)} V\\nNET ${n(s.gridTotalW)} W; Grid Guard ${flag(s.gridGuard)}\\nMaine P50 ${n(s.tomorrowP50,1)} kWh; ${s.forecastClass||\"N/A\"}\\nFORCE ${forceText()}\\nAlerte ${flow.get(\"alerts_enabled\")?\"ON\":\"OFF\"}; raport ${flow.get(\"report_enabled\")?\"ON\":\"OFF\"} ${flow.get(\"report_time\")}\\n/why /plan /limits /health`;\n}\nif(!mutations.has(cmd)&&![\"/help\",\"/start\",\"/health\"].includes(cmd)&&(!statusFresh||h?.ok!==true))text=\"ATENTIE: date lipsa/vechi sau eroare DVCC; vezi /health.\\n\"+text;\nif([\"/battery\",\"/limits\",\"/health\"].includes(cmd))text+=\"\\n\\n\"+cellGuardText();\nif([\"/help\",\"/start\"].includes(cmd))text+=\"\\n/cells - protectie celule si taper SOC\";\nif(cmd==='/health')text+='\\n\\n'+dischargeText();\nif(['/help','/start'].includes(cmd))text+='\\n/discharge A minute [SOC] | /discharge A soc SOC | /discharge off | /discharge status';\n// Plain text avoids HTML injection and preserves '<' in diagnostic strings.\nconst output={telegram_text:text,telegram_kind:kind,telegram_report_day:reportDay,telegram_queued_at:now};\nreturn [output,tick?{payload:now}:null];\n",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1170,
+    "y": 1180,
+    "wires": [
+      [
+        "tg_rate_272"
+      ],
+      [
+        "c6ab3c4a488844e7",
+        "v283_request"
+      ]
+    ]
+  },
+  {
+    "id": "45e674405b9f4446",
+    "type": "http request",
+    "z": "cbb68a3d67f841a3",
+    "name": "Telegram sendMessage",
+    "method": "POST",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 1450,
+    "y": 1180,
+    "wires": [
+      [
+        "v28_result"
+      ]
+    ]
+  },
+  {
+    "id": "28b1a33704b84506",
+    "type": "inject",
+    "z": "cbb68a3d67f841a3",
+    "name": "Telegram event check / 15 sec",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "15",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "8",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 1240,
+    "wires": [
+      [
+        "df23c871b92545fc"
+      ]
+    ]
+  },
+  {
+    "id": "df23c871b92545fc",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "Telegram event debounce + daily report",
+    "func": "const cfg=flow.get(\"solar_cfg\");if(!cfg||cfg.telegramEnabled!==true)return null;\nconst now=Date.now(),s=flow.get(\"controller_status\");\nconst parts=Object.fromEntries(new Intl.DateTimeFormat(\"en-GB\",{timeZone:cfg.timeZone,year:\"numeric\",month:\"2-digit\",day:\"2-digit\",hour:\"2-digit\",minute:\"2-digit\",hourCycle:\"h23\"}).formatToParts(new Date(now)).map(p=>[p.type,p.value]));\nconst day=parts.year+\"-\"+parts.month+\"-\"+parts.day,minute=Number(parts.hour)*60+Number(parts.minute);\nconst previousCheck=flow.get(\"report_last_check\");flow.set(\"report_last_check\",{day,minute,ts:now});\nconst out=[];\nconst reportTime=String(flow.get(\"report_time\")||cfg.reportDefaultTime).split(\":\").map(Number),reportMinute=reportTime[0]*60+reportTime[1];\nif(flow.get(\"report_enabled\")===true&&previousCheck&&previousCheck.day===day&&previousCheck.minute<reportMinute&&minute>=reportMinute&&minute-reportMinute<cfg.reportWindowMinutes&&flow.get(\"report_last_attempt\")!==day&&Number(flow.get(\"report_armed_at\")||0)<=previousCheck.ts){\n flow.set(\"report_last_attempt\",day);\n out.push({telegram_internal:true,telegram_command:\"__report\",telegram_report_day:day});\n}\nif(!s||!s.timestamp||now-s.timestamp>30000)return out.length?[out]:null;\nconst current={enabled:flow.get(\"controller_enabled\")===true,paused:s.paused,target:s.targetSoc??null,\n manual:s.manualTargetActive?`${s.targetSource}:${s.targetSoc}`:\"AUTO\",guard:!!s.gridGuard,\n bms:!!s.bmsConnected,ccl:s.bmsCcl??null,taper:s.batteryTaperReason||\"N/A\",\n tomorrow:!!s.tomorrowForecastValid,remaining:!!s.remainingForecastValid,\n fallback:!s.tomorrowForecastValid,veryPoor:String(s.forecastClass||\"\").startsWith(\"VERY_POOR\"),\n blocked:!!s.blocked&&!s.forceActive,stage:s.veryPoorStage||\"N/A\",force:!!s.forceActive,health:s.health?.ok===true,\n writerFault:s.writerFault||\"NONE\"};\nlet st=flow.get(\"telegram_alert_state\");\nlet events=flow.get(\"controller_events\")||[];flow.set(\"controller_events\",[]);\nconst alerts=flow.get(\"alerts_enabled\")===true;\nif(!st||!alerts||(!current.enabled&&!st.last.enabled&&cfg.telegramNotifyInDryRun!==true)){\n flow.set(\"telegram_alert_state\",{last:current,pending:{},sent:{}});return out.length?[out]:null;\n}\nconst labels={enabled:\"Control activ\",paused:\"Pauza\",target:\"Tinta SOC\",manual:\"Sursa tinta\",guard:\"NET Grid Guard\",bms:\"BMS conectat\",ccl:\"BMS CCL (A)\",taper:\"Taper baterie\",tomorrow:\"Forecast maine fresh\",remaining:\"Remaining Today fresh\",fallback:\"Fallback\",veryPoor:\"VERY_POOR\",blocked:\"Tinta atinsa / incarcare blocata\",stage:\"Etapa VERY_POOR\",force:\"FORCE curent\",health:\"Telemetrie/readback OK\",writerFault:\"Eroare writer\"};\nconst notes=[];\nfor(const key of Object.keys(current)){\n const a=st.last[key],b=current[key];\n const significant=key===\"ccl\"&&a!==null&&b!==null?Math.abs(a-b)>=cfg.alertCclDeltaA:a!==b;\n if(!significant){delete st.pending[key];continue;}\n if(!st.pending[key]||st.pending[key].value!==b)st.pending[key]={value:b,since:now};\n if(now-st.pending[key].since<cfg.alertDebounceMs||now-Number(st.sent[key]||0)<cfg.alertCooldownMs)continue;\n notes.push(labels[key]+\": \"+String(a??\"N/A\")+\" → \"+String(b??\"N/A\"));\n if(key===\"stage\"&&b===\"FINAL_100\")notes.push(\"Motiv ridicare: \"+s.veryPoorRaiseReason);\n if(key===\"health\"&&!b)notes.push((s.health?.faults||[]).join(\", \"));\n st.last[key]=b;st.sent[key]=now;delete st.pending[key];\n}\n// Manual command transitions/expiry are separate bounded events, grouped into one alert.\nfor(const e of events){\n if(now-e.ts>5*60000||e.ts<Number(flow.get(\"telegram_start\")||0))continue;\n const key=\"event_\"+e.kind;\n if(now-Number(st.sent[key]||0)<cfg.alertCooldownMs)continue;\n st.sent[key]=now;notes.push(e.detail);\n}\nflow.set(\"telegram_alert_state\",st);\nif(notes.length)out.unshift({telegram_internal:true,telegram_command:\"__alert\",telegram_event_text:\"EVENIMENTE VICTRON\\n\"+notes.join(\"\\n\")+`\\nSOC ${s.soc??\"N/A\"}%; plafon ${s.desiredA??\"N/A\"} A; citit DVCC ${s.dvccActualA??\"N/A\"} A.`});\nreturn out.length?[out]:null;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 480,
+    "y": 1240,
+    "wires": [
+      [
+        "91b32ad72f6b4bae"
+      ]
+    ]
+  },
+  {
+    "id": "06b748a7be674ff4",
+    "type": "debug",
+    "z": "cbb68a3d67f841a3",
+    "name": "Telegram API result",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1040,
+    "y": 1280,
+    "wires": []
+  },
+  {
+    "id": "a40e1d18487b4522",
+    "type": "comment",
+    "z": "cbb68a3d67f841a3",
+    "name": "FORCE: /force 15 | /force 15 70 | /forceoff — forecast/target ignorate temporar, Grid Guard ramane activ",
+    "info": "Durata 1-60 minute. Default 100A. Doar chat_id autorizat poate activa override-ul.",
+    "x": 620,
+    "y": 1280,
+    "wires": []
+  },
+  {
+    "id": "tg_rate_272",
+    "type": "delay",
+    "z": "cbb68a3d67f841a3",
+    "name": "Telegram max 1 message / 3s",
+    "pauseType": "rate",
+    "timeout": "3",
+    "timeoutUnits": "seconds",
+    "rate": "1",
+    "nbRateUnits": "3",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": false,
+    "allowrate": false,
+    "outputs": 1,
+    "x": 1180,
+    "y": 1360,
+    "wires": [
+      [
+        "v28_send"
+      ]
+    ]
+  },
+  {
+    "id": "tg_notes_272",
+    "type": "comment",
+    "z": "cbb68a3d67f841a3",
+    "name": "CITESTE — instalare, semantica comenzilor, limite verificare",
+    "info": "v2.8.4 — Venus OS 3.80 Large / Node-RED 4.1.11\nPachetul necesita instalarea separata a bridge.py ca serviciu supervizat pe Cerbo. Citeste README_RO.md din ZIP. Importul JSON singur NU instaleaza watchdog-ul.\n/discharge A minute [SOC] (implicit SOC30) sau /discharge A soc SOC (max120min), /discharge off, /discharge status.\n1-50A curent DC al bateriei, 1-240min, SOC20-95. Se opreste la primul prag: timp/SOC/ESS minimum/tensiune/temperatura/DCL/lipsa retea/heartbeat. Mod ESS net trifazat obligatoriu, DESS si incarcare programata inactive. Verificare readback pentru overrideuri. Nu schimba setpoint permanent, minSOC sau mod ESS. Maxim putere DC Multi 3000W; export NET cerut limitat la 12000W. Nu garanteaza curent exact si nu poate detecta un driver care republica valori fizic vechi.\nWatchdog independent, lease15sec, cererile nu se reiau dupa restart. Jurnalul de proprietate este in /run (RAM), nu scrie flash la fiecare puls. La crash supervisorul reporneste helperul si acesta elibereaza overrideurile proprii. Daca DBus/serviciul helper/supervisorul esueaza simultan, revenirea nu este garantata; BMS/ESS raman protectii independente.\nToate protectiile de incarcare v2.8.2 si salvarea energie 5min sunt pastrate. Limita CVL54.0V ramane manuala. La stop se revine ESS normal: acesta poate descarca bateria in consumatorii locali.\n\nv2.8.2 CELL GUARD — 2026-09-23\nACTUALIZARE: salvare energii la 5 minute. Datele HA raman citite la 60 secunde.\nFIX v2.8.4: plafonul global temporar 10 A este INACTIV implicit; se aplica numai cand commissioningChargeCapEnabled === true. Sub 90% SOC nu exista limitare din SOC; protectiile celulelor/BMS raman active. Nu mareste CVL, nu modifica BMS/VEConfigure. Pastreaza limita managed battery charge voltage 54.0V stabilita manual; aceasta versiune nu o scrie si nu ii confirma valoarea.\nSOC >=90%: 10 A, scadere 1 A/punct SOC, pana la 2 A la >=98%. Se aplica si FORCE.\nMax-cell BRUT >=3.40/3.43/3.45V: plafon 10/5/2A. Delta >=50mV cu max>=3.40V: 2A.\nSTOP 0 A la max>=3.50V SAU delta>=100mV cu max>=3.40V. Reluare numai dupa max<=3.43V si delta<=50mV pentru 60sec. Nu ocoleste BMS. Nu garanteaza ca o celula nu poate urca intre esantioane.\nDate max/min celule si SOC lipsa, invalide, vechi >20s sau conexiune marcata defecta: 0A. Citirile periodice ale driverului pot republica cache; nu sunt dovada unei masuratori fizice noi.\nDRY RUN/pause suspenda scrierile: protectia software nu poate opri incarcarea atunci. BMS ramane independent. Cand controlul este ON, toate comenzile folosesc aceeasi poarta DVCC.\n/cells arata pragurile, motivul, valorile brute si starea opririi. /why include explicatia. Alertele de tranzitie sunt livrate prin sistemul existent, daca /alerts on.\n",
+    "x": 540,
+    "y": 2250,
+    "wires": []
+  },
+  {
+    "id": "v28_in_ess_mode",
+    "type": "victron-input-custom",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.settings",
+    "path": "/Settings/CGwacs/Hub4Mode",
+    "serviceObj": {
+      "service": "com.victronenergy.settings",
+      "name": "com.victronenergy.settings"
+    },
+    "pathObj": {
+      "path": "/Settings/CGwacs/Hub4Mode",
+      "name": "ess_mode",
+      "type": "float"
+    },
+    "name": "ess_mode",
+    "onlyChanges": false,
+    "x": 220,
+    "y": 1570,
+    "wires": [
+      [
+        "v28_store_ess_mode"
+      ]
+    ]
+  },
+  {
+    "id": "v28_store_ess_mode",
+    "z": "cbb68a3d67f841a3",
+    "type": "function",
+    "name": "store ess_mode",
+    "func": "const r=msg.payload;const v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nflow.set(\"ess_mode\",Number.isFinite(v)?v:null);flow.set(\"ess_mode_ts\",Number.isFinite(v)?Date.now():0);return null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 570,
+    "y": 1570,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "v28_in_ess_min_soc",
+    "type": "victron-input-custom",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.settings",
+    "path": "/Settings/CGwacs/BatteryLife/MinimumSocLimit",
+    "serviceObj": {
+      "service": "com.victronenergy.settings",
+      "name": "com.victronenergy.settings"
+    },
+    "pathObj": {
+      "path": "/Settings/CGwacs/BatteryLife/MinimumSocLimit",
+      "name": "ess_min_soc",
+      "type": "float"
+    },
+    "name": "ess_min_soc",
+    "onlyChanges": false,
+    "x": 220,
+    "y": 1620,
+    "wires": [
+      [
+        "v28_store_ess_min_soc"
+      ]
+    ]
+  },
+  {
+    "id": "v28_store_ess_min_soc",
+    "z": "cbb68a3d67f841a3",
+    "type": "function",
+    "name": "store ess_min_soc",
+    "func": "const r=msg.payload;const v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nflow.set(\"ess_min_soc\",Number.isFinite(v)?v:null);flow.set(\"ess_min_soc_ts\",Number.isFinite(v)?Date.now():0);return null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 570,
+    "y": 1620,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "v28_in_ess_bl_soc",
+    "type": "victron-input-custom",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.settings",
+    "path": "/Settings/CGwacs/BatteryLife/SocLimit",
+    "serviceObj": {
+      "service": "com.victronenergy.settings",
+      "name": "com.victronenergy.settings"
+    },
+    "pathObj": {
+      "path": "/Settings/CGwacs/BatteryLife/SocLimit",
+      "name": "ess_bl_soc",
+      "type": "float"
+    },
+    "name": "ess_bl_soc",
+    "onlyChanges": false,
+    "x": 220,
+    "y": 1670,
+    "wires": [
+      [
+        "v28_store_ess_bl_soc"
+      ]
+    ]
+  },
+  {
+    "id": "v28_store_ess_bl_soc",
+    "z": "cbb68a3d67f841a3",
+    "type": "function",
+    "name": "store ess_bl_soc",
+    "func": "const r=msg.payload;const v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nflow.set(\"ess_bl_soc\",Number.isFinite(v)?v:null);flow.set(\"ess_bl_soc_ts\",Number.isFinite(v)?Date.now():0);return null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 570,
+    "y": 1670,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "v28_in_ess_bl_state",
+    "type": "victron-input-custom",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.settings",
+    "path": "/Settings/CGwacs/BatteryLife/State",
+    "serviceObj": {
+      "service": "com.victronenergy.settings",
+      "name": "com.victronenergy.settings"
+    },
+    "pathObj": {
+      "path": "/Settings/CGwacs/BatteryLife/State",
+      "name": "ess_bl_state",
+      "type": "float"
+    },
+    "name": "ess_bl_state",
+    "onlyChanges": false,
+    "x": 220,
+    "y": 1720,
+    "wires": [
+      [
+        "v28_store_ess_bl_state"
+      ]
+    ]
+  },
+  {
+    "id": "v28_store_ess_bl_state",
+    "z": "cbb68a3d67f841a3",
+    "type": "function",
+    "name": "store ess_bl_state",
+    "func": "const r=msg.payload;const v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nflow.set(\"ess_bl_state\",Number.isFinite(v)?v:null);flow.set(\"ess_bl_state_ts\",Number.isFinite(v)?Date.now():0);return null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 570,
+    "y": 1720,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "v28_in_ess_grid_setpoint",
+    "type": "victron-input-custom",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.settings",
+    "path": "/Settings/CGwacs/AcPowerSetPoint",
+    "serviceObj": {
+      "service": "com.victronenergy.settings",
+      "name": "com.victronenergy.settings"
+    },
+    "pathObj": {
+      "path": "/Settings/CGwacs/AcPowerSetPoint",
+      "name": "ess_grid_setpoint",
+      "type": "float"
+    },
+    "name": "ess_grid_setpoint",
+    "onlyChanges": false,
+    "x": 220,
+    "y": 1770,
+    "wires": [
+      [
+        "v28_store_ess_grid_setpoint"
+      ]
+    ]
+  },
+  {
+    "id": "v28_store_ess_grid_setpoint",
+    "z": "cbb68a3d67f841a3",
+    "type": "function",
+    "name": "store ess_grid_setpoint",
+    "func": "const r=msg.payload;const v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nflow.set(\"ess_grid_setpoint\",Number.isFinite(v)?v:null);flow.set(\"ess_grid_setpoint_ts\",Number.isFinite(v)?Date.now():0);return null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 570,
+    "y": 1770,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "v28_in_ess_active_soc",
+    "type": "victron-input-custom",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.system/0",
+    "path": "/Control/ActiveSocLimit",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "com.victronenergy.system/0"
+    },
+    "pathObj": {
+      "path": "/Control/ActiveSocLimit",
+      "name": "ess_active_soc",
+      "type": "float"
+    },
+    "name": "ess_active_soc",
+    "onlyChanges": false,
+    "x": 220,
+    "y": 1820,
+    "wires": [
+      [
+        "v28_store_ess_active_soc"
+      ]
+    ]
+  },
+  {
+    "id": "v28_store_ess_active_soc",
+    "z": "cbb68a3d67f841a3",
+    "type": "function",
+    "name": "store ess_active_soc",
+    "func": "const r=msg.payload;const v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nflow.set(\"ess_active_soc\",Number.isFinite(v)?v:null);flow.set(\"ess_active_soc_ts\",Number.isFinite(v)?Date.now():0);return null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 570,
+    "y": 1820,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "v28_in_dvcc_actual",
+    "type": "victron-input-custom",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.settings",
+    "path": "/Settings/SystemSetup/MaxChargeCurrent",
+    "serviceObj": {
+      "service": "com.victronenergy.settings",
+      "name": "com.victronenergy.settings"
+    },
+    "pathObj": {
+      "path": "/Settings/SystemSetup/MaxChargeCurrent",
+      "name": "dvcc_actual",
+      "type": "float"
+    },
+    "name": "dvcc_actual",
+    "onlyChanges": false,
+    "x": 220,
+    "y": 1870,
+    "wires": [
+      [
+        "v28_store_dvcc_actual"
+      ]
+    ]
+  },
+  {
+    "id": "v28_store_dvcc_actual",
+    "z": "cbb68a3d67f841a3",
+    "type": "function",
+    "name": "store dvcc_actual",
+    "func": "const r=msg.payload;const v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nflow.set(\"dvcc_actual\",Number.isFinite(v)?v:null);flow.set(\"dvcc_actual_ts\",Number.isFinite(v)?Date.now():0);return null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 570,
+    "y": 1870,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "v28_in_bms_dcl",
+    "type": "victron-input-custom",
+    "z": "cbb68a3d67f841a3",
+    "service": "com.victronenergy.battery/512",
+    "path": "/Info/MaxDischargeCurrent",
+    "serviceObj": {
+      "service": "com.victronenergy.battery/512",
+      "name": "com.victronenergy.battery/512"
+    },
+    "pathObj": {
+      "path": "/Info/MaxDischargeCurrent",
+      "name": "bms_dcl",
+      "type": "float"
+    },
+    "name": "bms_dcl",
+    "onlyChanges": false,
+    "x": 220,
+    "y": 1920,
+    "wires": [
+      [
+        "v28_store_bms_dcl"
+      ]
+    ]
+  },
+  {
+    "id": "v28_store_bms_dcl",
+    "z": "cbb68a3d67f841a3",
+    "type": "function",
+    "name": "store bms_dcl",
+    "func": "const r=msg.payload;const v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nflow.set(\"bms_dcl\",Number.isFinite(v)?v:null);flow.set(\"bms_dcl_ts\",Number.isFinite(v)?Date.now():0);return null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 570,
+    "y": 1920,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "v28_gate",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "name": "DVCC verify + watchdog + bounded retries",
+    "func": "const cfg=flow.get(\"solar_cfg\");if(!cfg)return null;\nconst now=Date.now();\nfunction number(k){const r=flow.get(k);if(r===null||r===undefined||typeof r===\"boolean\"||r===\"\")return null;const v=Number(r);return Number.isFinite(v)?v:null;}\nfunction fresh(k,ttl){const ts=number(k+\"_ts\");return number(k)!==null&&ts>0&&now-ts>=0&&now-ts<=ttl;}\nconst live=[\"soc\",\"battery_voltage\",\"battery_current\",\"grid_l1\",\"grid_l2\",\"grid_l3\"];\nconst essential=[...live,\"bms_connected\",\"bms_ccl\",\"bms_cvl\",\"dvcc_actual\"];\nconst sourceFaults=flow.get(\"source_faults\")||{};\nconst faults=[];\nfor(const k of live)if(!fresh(k,cfg.liveMaxAgeMs))faults.push(k+\":lipsa/vechi\");\nfor(const k of [\"bms_connected\",\"bms_ccl\",\"bms_cvl\"])if(!fresh(k,cfg.bmsMaxAgeMs))faults.push(k+\":lipsa/vechi\");\nif(number(\"bms_connected\")!==1)faults.push(\"BMS_DECONNECTED\");\nif(!fresh(\"dvcc_actual\",cfg.dvccReadbackMaxAgeMs))faults.push(\"DVCC_READBACK_MISSING\");\nfor(const k of essential)if(sourceFaults[k])faults.push(k+\":conexiune\");\nlet ws=flow.get(\"writer_state\")||{};\nconst actual=fresh(\"dvcc_actual\",cfg.dvccReadbackMaxAgeMs)&&!sourceFaults.dvcc_actual?number(\"dvcc_actual\"):null;\nconst actualTs=number(\"dvcc_actual_ts\")||0;\nlet latched=flow.get(\"writer_fault\")||null;\n// A post-write readback matching the request confirms only this setting, not physical charge current.\nconst ack=ws.requested!==undefined&&actual!==null&&Math.abs(actual-ws.requested)<0.1&&actualTs>=Number(ws.sentAt||0);\nif(ack){ws.confirmedAt=actualTs;ws.attempts=0;}\nelse if(ws.requested!==undefined&&now-Number(ws.sentAt||0)>=cfg.dvccRetryMs&&Number(ws.attempts||0)>=cfg.dvccMaxAttempts){\n latched=\"DVCC_WRITE_UNCONFIRMED\";flow.set(\"writer_fault\",latched);\n}\nif(latched)faults.push(latched);\nconst cg=flow.get(\"charge_guard\");\nif(!cg||!Number.isFinite(cg.timestamp)||now-cg.timestamp<0||now-cg.timestamp>10000||!cg.valid)faults.push(\"CELL_GUARD_NOT_READY\");\nconst healthy=faults.length===0;\nconst enabled=flow.get(\"controller_enabled\")===true;\nconst paused=Number(flow.get(\"pause_until\")||0)>now;\nlet desired=Number(msg.payload);\nif(!Number.isFinite(desired)||desired<0){desired=0;faults.push(\"INVALID_REQUEST\");}\nconst ccl=number(\"bms_ccl\");\nlet finalA=faults.length?0:Math.max(0,Math.min(Math.floor(desired),Math.floor(ccl),cfg.hardMaxA));\nfinalA=Math.min(finalA,Number.isFinite(cg?.capA)?cg.capA:0);\nlet out=null;\nif(enabled&&!paused){\n const changed=ws.requested!==finalA;\n // Fresh readback already equals target: no unnecessary write.\n const alreadyApplied=actual!==null&&Math.abs(actual-finalA)<0.1;\n if(changed&&alreadyApplied){ws={requested:finalA,sentAt:0,attempts:0,confirmedAt:actualTs};}\n else if(changed||(!alreadyApplied&&now-Number(ws.sentAt||0)>=cfg.dvccRetryMs&&Number(ws.attempts||0)<cfg.dvccMaxAttempts)){\n  if(flow.get(\"dvcc_before_control\")==null&&actual!==null)flow.set(\"dvcc_before_control\",actual);\n  ws={requested:finalA,sentAt:now,attempts:changed?1:Number(ws.attempts||0)+1,confirmedAt:null};\n  out={payload:finalA,topic:\"DVCC MaxChargeCurrent\"};flow.set(\"last_dvcc_sent\",finalA);\n }\n}\nflow.set(\"writer_state\",ws);\nconst verified=enabled&&!paused&&actual!==null&&Math.abs(actual-finalA)<0.1&&(ws.sentAt===0||actualTs>=Number(ws.sentAt||0));\nconst health={ok:faults.length===0,faults,liveMissing:live.filter(k=>!fresh(k,cfg.liveMaxAgeMs)),timestamp:now};\nflow.set(\"controller_health\",health);flow.set(\"readback_confirmed\",verified);\nconst s=flow.get(\"controller_status\")||{};\nObject.assign(s,{timestamp:now,enabled,paused,pauseUntil:Number(flow.get(\"pause_until\")||0),health,\n chargeGuard:cg,algorithmDesiredA:desired,desiredA:finalA,dvccActualA:actual,dvccConfirmed:verified,\n dvccLastSentA:flow.get(\"last_dvcc_sent\"),dvccAttempts:Number(ws.attempts||0),writerFault:latched,\n writeState:!enabled?\"DRY_RUN\":paused?\"PAUSED\":latched?\"FAULT\":verified?\"CONFIRMED\":\"PENDING\"});\ns.reasonCodes=[];\nif(cg&&cg.reason!==\"NONE\")s.reasonCodes.push(cg.reason);\nif(!enabled)s.reasonCodes.push(\"DRY_RUN\");if(paused)s.reasonCodes.push(\"PAUSED\");\nif(faults.length)s.reasonCodes.push(\"TELEMETRY_OR_WRITE_FAULT\");\nif(s.forceActive)s.reasonCodes.push(\"FORCE_ACTIVE\");else if(s.blocked)s.reasonCodes.push(\"TARGET_REACHED\");\nif(s.manualTargetActive)s.reasonCodes.push(s.targetSource);\nif(!s.tomorrowForecastValid)s.reasonCodes.push(\"FORECAST_FALLBACK\");\nif(s.veryPoorStage===\"HOLD_90\")s.reasonCodes.push(\"VERY_POOR_HOLD_90\");\nif(s.veryPoorStage===\"FINAL_100\")s.reasonCodes.push(\"VERY_POOR_\"+s.veryPoorRaiseReason);\nif(s.gridGuard)s.reasonCodes.push(finalA===0?\"GRID_GUARD_STOP\":\"GRID_GUARD_REDUCED\");\nif(s.bmsCclLimited)s.reasonCodes.push(\"BMS_CCL_LIMITING\");\nif(s.batteryAwareCapA<s.strategyA)s.reasonCodes.push(\"TAPER_\"+s.batteryTaperReason);\nif(s.solarOnlyCapA!==null&&s.solarOnlyCapA!==undefined)s.reasonCodes.push(\"SOLAR_ONLY_CAP\");\nif(!s.reasonCodes.length)s.reasonCodes.push(s.energyDecision||\"AUTOMATIC\");\nflow.set(\"controller_status\",s);\nnode.status({fill:faults.length?\"red\":paused?\"yellow\":enabled?\"green\":\"grey\",shape:\"dot\",text:s.writeState+\" | calculat \"+finalA+\"A / citit \"+(actual===null?\"N/A\":actual)+\"A\"});\nreturn out;\n",
+    "x": 690,
+    "y": 800,
+    "wires": [
+      [
+        "a7e07b9d5ed54616"
+      ]
+    ],
+    "outputs": 1
+  },
+  {
+    "id": "v28_send",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "name": "Telegram send request",
+    "func": "const cfg=flow.get(\"solar_cfg\");if(!cfg||cfg.telegramEnabled!==true)return null;\nconst token=String(cfg.telegramBotToken||\"\").trim();if(!token||token.includes(\"PASTE_\"))return null;\n// Queued notifications from before a redeploy are discarded. Commands were already executed once.\nif(!msg.telegram_text||msg.telegram_queued_at<Number(flow.get(\"telegram_start\")||0)||Date.now()-msg.telegram_queued_at>5*60000)return null;\nif(msg.telegram_kind===\"alert\"&&flow.get(\"alerts_enabled\")!==true)return null;\nif(msg.telegram_kind===\"report\"&&flow.get(\"report_enabled\")!==true)return null;\nif(Date.now()<Number(flow.get(\"telegram_send_backoff\")||0)){flow.set(\"telegram_delivery_error\",\"RATE_LIMITED_DROPPED\");return null;}\nreturn {url:\"https://api.telegram.org/bot\"+token+\"/sendMessage\",headers:{\"Content-Type\":\"application/json\"},requestTimeout:10000,\n telegram_kind:msg.telegram_kind,telegram_report_day:msg.telegram_report_day,\n payload:{chat_id:String(cfg.telegramChatId),text:String(msg.telegram_text).slice(0,4000),disable_web_page_preview:true}};\n",
+    "x": 1310,
+    "y": 1360,
+    "wires": [
+      [
+        "45e674405b9f4446"
+      ]
+    ],
+    "outputs": 1
+  },
+  {
+    "id": "v28_result",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "name": "Telegram delivery / API errors",
+    "func": "const ok=msg.payload?.ok===true;\nflow.set(\"telegram_send_ok\",ok);flow.set(\"telegram_send_ts\",Date.now());\nif(ok){flow.set(\"telegram_delivery_error\",null);if(msg.telegram_report_day)flow.set(\"report_last_success\",msg.telegram_report_day);}\nelse{\n const code=Number(msg.payload?.error_code||msg.statusCode||0);flow.set(\"telegram_delivery_error\",\"API_\"+code);\n const retry=Number(msg.payload?.parameters?.retry_after||0);\n if(code===429)flow.set(\"telegram_send_backoff\",Date.now()+Math.max(10000,Math.min(3600000,retry*1000)));\n}\n// Do not return HTTP request metadata: URL contains bot token.\nnode.status({fill:ok?\"green\":\"red\",shape:\"ring\",text:ok?\"livrat\":\"eroare livrare\"});\nreturn {payload:{ok,code:ok?200:Number(msg.payload?.error_code||msg.statusCode||0)}};\n",
+    "x": 1520,
+    "y": 1360,
+    "wires": [
+      [
+        "06b748a7be674ff4"
+      ]
+    ],
+    "outputs": 1
+  },
+  {
+    "id": "v28_tg_catch",
+    "type": "catch",
+    "z": "cbb68a3d67f841a3",
+    "name": "Telegram transport errors",
+    "scope": [
+      "295fddac1bc14b30",
+      "45e674405b9f4446"
+    ],
+    "uncaught": false,
+    "x": 220,
+    "y": 2070,
+    "wires": [
+      [
+        "v28_tg_error"
+      ]
+    ]
+  },
+  {
+    "id": "v28_tg_error",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "name": "Telegram error (redacted)",
+    "func": "if(msg.error?.source?.id===\"295fddac1bc14b30\"){\n flow.set(\"telegram_inflight\",null);flow.set(\"telegram_poll_ok\",false);flow.set(\"telegram_error_code\",\"TRANSPORT\");flow.set(\"telegram_poll_backoff\",Date.now()+10000);\n}else{flow.set(\"telegram_send_ok\",false);flow.set(\"telegram_delivery_error\",\"TRANSPORT\");}\nnode.status({fill:\"red\",shape:\"ring\",text:\"Telegram transport error; control independent\"});return null;\n",
+    "x": 580,
+    "y": 2070,
+    "wires": [
+      []
+    ],
+    "outputs": 1
+  },
+  {
+    "id": "v28_ha_catch",
+    "type": "catch",
+    "z": "cbb68a3d67f841a3",
+    "name": "HA request error",
+    "scope": [
+      "690bc2f8b8dd4b70"
+    ],
+    "uncaught": false,
+    "x": 220,
+    "y": 2120,
+    "wires": [
+      [
+        "v28_ha_error"
+      ]
+    ]
+  },
+  {
+    "id": "v28_ha_error",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "name": "HA unavailable → forecast fallback",
+    "func": "for(const k of [\"forecast_valid\",\"forecast_tomorrow_data_valid\",\"forecast_remaining_data_valid\",\"forecast_power_data_valid\"])flow.set(k,false);\nflow.set(\"ha_error\",\"HTTP_TRANSPORT_ERROR\");flow.set(\"daily_energy\",null);\nnode.status({fill:\"red\",shape:\"ring\",text:\"HA indisponibil; forecast fallback\"});return {payload:Date.now()};\n",
+    "x": 580,
+    "y": 2120,
+    "wires": [
+      [
+        "c6ab3c4a488844e7"
+      ]
+    ],
+    "outputs": 1
+  },
+  {
+    "id": "v28_status",
+    "type": "status",
+    "z": "cbb68a3d67f841a3",
+    "name": "Victron node connection status",
+    "scope": [
+      "5319d89a041b45da",
+      "c516171c16b34e7f",
+      "399a9f596a054ad5",
+      "628bfea7c9de4e8f",
+      "3ac546106be74500",
+      "848e69e8924d41b0",
+      "0ece2fcb08f844fe",
+      "da0085f957764e5b",
+      "b96f64df856f4ef5",
+      "44d6f1a0472e40c5",
+      "d67e2e05e34e4a85",
+      "a16f9d1d3a6d4242",
+      "789dfd57d5464d83",
+      "v28_in_ess_mode",
+      "v28_in_ess_min_soc",
+      "v28_in_ess_bl_soc",
+      "v28_in_ess_bl_state",
+      "v28_in_ess_grid_setpoint",
+      "v28_in_ess_active_soc",
+      "v28_in_dvcc_actual",
+      "v28_in_bms_dcl"
+    ],
+    "x": 220,
+    "y": 2170,
+    "wires": [
+      [
+        "v28_status_store"
+      ]
+    ]
+  },
+  {
+    "id": "v28_status_store",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "name": "Store connection faults",
+    "func": "const keyMap={\"5319d89a041b45da\": \"soc\", \"c516171c16b34e7f\": \"battery_voltage\", \"399a9f596a054ad5\": \"battery_current\", \"628bfea7c9de4e8f\": \"grid_l1\", \"3ac546106be74500\": \"grid_l2\", \"848e69e8924d41b0\": \"grid_l3\", \"0ece2fcb08f844fe\": \"dc_overfeed\", \"da0085f957764e5b\": \"bms_connected\", \"b96f64df856f4ef5\": \"bms_ccl\", \"44d6f1a0472e40c5\": \"bms_cvl\", \"d67e2e05e34e4a85\": \"bms_max_cell\", \"a16f9d1d3a6d4242\": \"bms_min_cell\", \"789dfd57d5464d83\": \"bms_temp\", \"v28_in_ess_mode\": \"ess_mode\", \"v28_in_ess_min_soc\": \"ess_min_soc\", \"v28_in_ess_bl_soc\": \"ess_bl_soc\", \"v28_in_ess_bl_state\": \"ess_bl_state\", \"v28_in_ess_grid_setpoint\": \"ess_grid_setpoint\", \"v28_in_ess_active_soc\": \"ess_active_soc\", \"v28_in_dvcc_actual\": \"dvcc_actual\", \"v28_in_bms_dcl\": \"bms_dcl\"};\nconst key=keyMap[msg.status?.source?.id];if(!key)return null;\nconst st=msg.status||{},t=String(st.text||\"\").toLowerCase();\nconst faults=flow.get(\"source_faults\")||{};\n// Red status or explicit connection/path errors invalidate despite cached periodic values.\nif(st.fill===\"red\"||/disconnect|not connected|not found|unavailable|missing|connecting|no service|no path/.test(t))faults[key]=true;\nelse if(st.fill===\"green\"||st.fill===\"blue\"||st.fill===\"grey\")delete faults[key];\nflow.set(\"source_faults\",faults);return null;\n",
+    "x": 580,
+    "y": 2170,
+    "wires": [
+      []
+    ],
+    "outputs": 1
+  },
+  {
+    "id": "v281_read_a",
+    "type": "file in",
+    "z": "cbb68a3d67f841a3",
+    "name": "Read energy checkpoint A",
+    "filename": "filename",
+    "filenameType": "msg",
+    "format": "utf8",
+    "chunk": false,
+    "sendError": true,
+    "encoding": "utf8",
+    "allProps": false,
+    "x": 210,
+    "y": 2370,
+    "wires": [
+      [
+        "v281_stash_a"
+      ]
+    ]
+  },
+  {
+    "id": "v281_read_b",
+    "type": "file in",
+    "z": "cbb68a3d67f841a3",
+    "name": "Read energy checkpoint B",
+    "filename": "filename",
+    "filenameType": "msg",
+    "format": "utf8",
+    "chunk": false,
+    "sendError": true,
+    "encoding": "utf8",
+    "allProps": false,
+    "x": 700,
+    "y": 2370,
+    "wires": [
+      [
+        "v281_restore"
+      ]
+    ]
+  },
+  {
+    "id": "v281_stash_a",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "Read second checkpoint",
+    "func": "const cfg=flow.get(\"solar_cfg\");if(!cfg)return null;return {filename:cfg.energyStateBase+\".B.json\",energy_checkpoint_a:typeof msg.payload===\"string\"?msg.payload:null};",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 450,
+    "y": 2370,
+    "wires": [
+      [
+        "v281_read_b"
+      ]
+    ]
+  },
+  {
+    "id": "v281_restore",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "Restore valid energy checkpoint",
+    "func": "const cfg=flow.get(\"solar_cfg\");if(!cfg)return null;\nfunction valid(s){\n if(!s||s.schema!==1||s.timeZone!==cfg.timeZone||!Number.isSafeInteger(s.seq)||s.seq<0||!s.meters||typeof s.meters!=='object'||Array.isArray(s.meters)||!Number.isFinite(s.savedAt)||s.savedAt>Date.now()+60000)return false;\n for(const m of Object.values(s.meters)){\n  if(!m||typeof m.entity!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(m.day)||typeof m.partial!=='boolean'||typeof m.estimated!=='boolean')return false;\n  for(const k of ['total','last','lastTs','start','resets'])if(!Number.isFinite(m[k])||m[k]<0)return false;\n }\n return true;\n}\nconst candidates=[];\nfor(const raw of [msg.energy_checkpoint_a,msg.payload]){\n try{const s=typeof raw==='string'?JSON.parse(raw):null;if(valid(s))candidates.push(s);}catch(e){}\n}\nconst loaded=candidates.sort((a,b)=>b.seq-a.seq)[0];\nflow.set(\"energy_state\",loaded||{schema:1,timeZone:cfg.timeZone,seq:0,savedAt:Date.now(),meters:{}});\nflow.set(\"energy_ready\",true);flow.set(\"energy_save_requested\",0);\nflow.set(\"energy_storage_status\",loaded?'RESTORED':'NEW_BASELINE');\nnode.status({fill:loaded?'green':'yellow',shape:'ring',text:loaded?'Contoare restaurate':'Prima baza: totaluri partiale'});\nreturn {payload:Date.now()};\n",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 990,
+    "y": 2370,
+    "wires": [
+      [
+        "1d327b3fac08497b"
+      ]
+    ]
+  },
+  {
+    "id": "v281_read_catch",
+    "type": "catch",
+    "z": "cbb68a3d67f841a3",
+    "name": "Checkpoint read errors (first start OK)",
+    "scope": [
+      "v281_read_a",
+      "v281_read_b"
+    ],
+    "uncaught": false,
+    "x": 260,
+    "y": 2420,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "v281_energy",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "Measured daily PV + cumulative delta",
+    "func": "const cfg=flow.get(\"solar_cfg\");if(!cfg||flow.get(\"energy_ready\")!==true)return null;\nif(!Array.isArray(msg.payload)||Number(msg.statusCode||200)!==200){flow.set(\"daily_energy\",null);return null;}\nconst now=Date.now();\nfunction day(ts){const p=Object.fromEntries(new Intl.DateTimeFormat(\"en-CA\",{timeZone:cfg.timeZone,year:\"numeric\",month:\"2-digit\",day:\"2-digit\"}).formatToParts(new Date(ts)).map(p=>[p.type,p.value]));return `${p.year}-${p.month}-${p.day}`;}\nconst today=day(now);\nfunction midnight(){let lo=now-30*3600000,hi=now;while(hi-lo>1){const m=Math.floor((lo+hi)/2);if(day(m)===today)hi=m;else lo=m;}return hi;}\nfunction read(id){\n const e=msg.payload.find(x=>x?.entity_id===id);if(!e||e.state===null||e.state===undefined||typeof e.state===\"boolean\"||String(e.state).trim()===\"\")return null;\n const v=Number(e.state),u=String(e.attributes?.unit_of_measurement||\"\").trim().toLowerCase();\n if(!Number.isFinite(v)||v<0||!['kwh','wh'].includes(u))return null;\n return {value:u==='wh'?v/1000:v,updated:Date.parse(e.last_updated||\"\")};\n}\nlet state=flow.get(\"energy_state\")||{schema:1,timeZone:cfg.timeZone,seq:0,meters:{}};\nconst daily={day:today,fetchedAt:now,values:{},pvSources:[]};\nconst pvIds=[...new Set(cfg.entityDailyPvSources||[])];let pvTotal=0,pvComplete=pvIds.length>0;\nfor(const id of pvIds){\n const r=read(id);\n // A daily PV sensor still carrying yesterday's value must not count as today's production.\n const valid=r!==null&&Number.isFinite(r.updated)&&day(r.updated)===today;\n daily.pvSources.push({entity:id,kwh:valid?r.value:null});\n if(valid)pvTotal+=r.value;else pvComplete=false;\n}\ndaily.values.pv={kwh:pvComplete?pvTotal:null,kind:'daily',partial:!pvComplete};\nfor(const [key,id] of Object.entries(cfg.energyCumulativeEntities||{})){\n const r=read(id);let m=state.meters[key];\n if(!r){daily.values[key]={kwh:null,entity:id,unavailable:true};continue;}\n if(!m||m.entity!==id){\n  m={entity:id,day:today,total:0,last:r.value,lastTs:now,start:now,partial:true,estimated:false,resets:0};\n }else if(now<m.lastTs){\n  m={entity:id,day:today,total:0,last:r.value,lastTs:now,start:now,partial:true,estimated:false,resets:0};\n }else if(m.day!==today){\n  const boundary=midnight(),delta=r.value-m.last,span=now-m.lastTs;\n  const nearby=span>0&&span<=cfg.energyBoundaryMaxGapMs&&day(m.lastTs)===day(boundary-1)&&delta>=0;\n  // No exact midnight sample: apportion only a small crossing interval; explicitly mark estimate.\n  m={entity:id,day:today,total:nearby?delta*(now-boundary)/span:0,last:r.value,lastTs:now,\n   start:nearby?boundary:now,partial:!nearby,estimated:nearby&&delta>0&&now!==boundary,resets:delta<0?1:0};\n }else{\n  const delta=r.value-m.last;\n  if(delta>=0){m.total+=delta;}\n  else{\n   // Reset/replacement/correction: keep accumulated known energy and establish new baseline.\n   // Do not add entire new counter value; post-reset origin is unknown.\n   m.partial=true;m.resets+=1;\n  }\n  m.last=r.value;m.lastTs=now;\n }\n state.meters[key]=m;\n daily.values[key]={kwh:m.total,entity:id,kind:'cumulative-delta',partial:m.partial,estimated:m.estimated,start:m.start,resets:m.resets};\n}\nstate.schema=1;state.timeZone=cfg.timeZone;state.savedAt=now;\nflow.set(\"energy_state\",state);flow.set(\"daily_energy\",daily);\nnode.status({fill:'green',shape:'dot',text:`Energie ${today} | PV ${pvComplete?pvTotal.toFixed(2):'N/A'} kWh`});\n// Two alternating snapshots: a torn write does not destroy the previous checkpoint.\nif(now-Number(flow.get(\"energy_save_requested\")||0)<cfg.energySaveEveryMs)return null;\nstate.seq=Number(state.seq||0)+1;flow.set(\"energy_state\",state);flow.set(\"energy_save_requested\",now);\nreturn {filename:cfg.energyStateBase+'.'+(state.seq%2===0?'A':'B')+'.json',payload:JSON.stringify(state),energy_seq:state.seq};\n",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 470,
+    "y": 2490,
+    "wires": [
+      [
+        "v281_save"
+      ]
+    ]
+  },
+  {
+    "id": "v281_save",
+    "type": "file",
+    "z": "cbb68a3d67f841a3",
+    "name": "Save alternating energy checkpoint",
+    "filename": "filename",
+    "filenameType": "msg",
+    "appendNewline": false,
+    "createDir": true,
+    "overwriteFile": "true",
+    "encoding": "utf8",
+    "x": 820,
+    "y": 2490,
+    "wires": [
+      [
+        "v281_saved"
+      ]
+    ]
+  },
+  {
+    "id": "v281_saved",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "Energy checkpoint saved",
+    "func": "flow.set(\"energy_storage_status\",\"SAVED\");flow.set(\"energy_saved_at\",Date.now());return null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1120,
+    "y": 2490,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "v281_save_catch",
+    "type": "catch",
+    "z": "cbb68a3d67f841a3",
+    "name": "Energy persistence failed",
+    "scope": [
+      "v281_save"
+    ],
+    "uncaught": false,
+    "x": 280,
+    "y": 2550,
+    "wires": [
+      [
+        "v281_save_error"
+      ]
+    ]
+  },
+  {
+    "id": "v281_save_error",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "Storage failure visible in report",
+    "func": "flow.set(\"energy_storage_status\",\"WRITE_FAILED\");node.status({fill:\"red\",shape:\"ring\",text:\"Salvare energie esuata; doar memorie\"});return null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 620,
+    "y": 2550,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "v282_charge_guard",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "RAW CELL STOP + SOC90 taper + optional manual cap",
+    "func": "// v2.8.2: independent charge ceiling, always applied before the sole DVCC gate.\nconst cfg=flow.get('solar_cfg');if(!cfg)return null;\nconst now=Date.now(),faults=flow.get('source_faults')||{};\nfunction sample(k){const r=flow.get(k),ts=Number(flow.get(k+'_ts'));const age=now-ts;\n if(r===null||r===undefined||r===''||typeof r==='boolean'||!Number.isFinite(Number(r))||!Number.isFinite(ts)||ts<=0||age<0||age>20000||faults[k])return null;\n return Number(r);\n}\nconst soc=sample('soc'),max=sample('bms_max_cell'),min=sample('bms_min_cell');\nconst delta=max!==null&&min!==null?max-min:null;\nconst valid=soc!==null&&soc>=0&&soc<=100&&max!==null&&min!==null&&min>=2&&max<=4&&max>=min;\nlet cap=Number(cfg.hardMaxA),reason='NONE',socCap=null,cellCap=null;\nfunction limit(a,r){if(a<cap){cap=a;reason=r;}}\n// Optional global commissioning cap is opt-in; never enabled by a missing setting.\nif(cfg.commissioningChargeCapEnabled===true)limit(10,'COMMISSIONING_10A');\nlet st=flow.get('cell_guard_state')||{blocked:false,safeSince:0,started:now};\nconst previous=st.blocked;\nif(!valid){cap=0;reason='CELL_TELEMETRY_INVALID';st.safeSince=0;}\nelse{\n // SOC taper is always active, including FORCE and when cell telemetry is present.\n if(soc>=90){socCap=Math.max(2,Math.floor(10-(Math.min(soc,98)-90)));limit(socCap,'SOC_TOP_TAPER');}\n cellCap=max>=3.45?2:max>=3.43?5:max>=3.40?10:cfg.hardMaxA;\n limit(cellCap,'RAW_MAX_CELL_TAPER');\n if(max>=3.40&&delta>=0.05)limit(2,'CELL_DELTA_TAPER');\n // No EMA/debounce on trip. A software stop is deliberately below BMS alarm thresholds.\n if(max>=3.50||(max>=3.40&&delta>=0.10)){\n  st.blocked=true;st.safeSince=0;st.tripReason=max>=3.50?'CELL_HIGH_STOP':'CELL_DELTA_STOP';\n }\n if(st.blocked){\n  if(max<=3.43&&delta<=0.05){\n   if(!st.safeSince)st.safeSince=now;\n   if(now-st.safeSince>=60000){st.blocked=false;st.safeSince=0;}\n  }else st.safeSince=0;\n }\n if(st.blocked){cap=0;reason=st.tripReason||'CELL_STOP_HOLD';}\n}\nflow.set('cell_guard_state',st);\nconst g={timestamp:now,capA:cap,reason,blocked:st.blocked,valid,maxV:max,minV:min,deltaV:delta,socCapA:socCap,cellCapA:cellCap,releaseAfterSec:st.safeSince?Math.max(0,Math.ceil((60000-now+st.safeSince)/1000)):null};\nflow.set('charge_guard',g);\nif(previous!==st.blocked){\n const q=flow.get('controller_events')||[];\n q.push({kind:st.blocked?'CELL_STOP':'CELL_RECOVERED',ts:now,detail:st.blocked?`Incarcare oprita preventiv: ${reason}; max ${max} V, delta ${delta===null?'N/A':Math.round(delta*1000)} mV.`:'Protectie celule: conditii de reluare stabile 60 s; reincarcare permisa cu plafon redus.'});\n flow.set('controller_events',q.slice(-40));\n}\nif(flow.get('discharge_request')||flow.get('discharge_cancel')||(flow.get('discharge_bridge')||{}).active){cap=0;g.capA=0;g.reason='DISCHARGE_INTERLOCK';flow.set('charge_guard',g);}\nlet requested=Number(msg.payload);if(!Number.isFinite(requested)||requested<0)requested=0;\nmsg.payload=Math.min(requested,cap);\nnode.status({fill:cap===0?'red':'green',shape:'dot',text:reason+' | '+cap+' A'});\nreturn msg;\n",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 590,
+    "y": 2650,
+    "wires": [
+      [
+        "v28_gate"
+      ]
+    ]
+  },
+  {
+    "id": "v283_request",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "Local discharge lease (base64 only)",
+    "func": "const cfg=flow.get('solar_cfg');if(!cfg)return null;\nconst now=Date.now();let req=flow.get('discharge_request');\nconst h=flow.get('controller_health');\nconst required=['soc','battery_voltage','battery_current','grid_l1','grid_l2','grid_l3','bms_connected','bms_ccl','bms_cvl','bms_dcl','bms_min_cell','bms_max_cell','bms_temp'];\nconst sf=flow.get('source_faults')||{};\nconst fresh=required.every(k=>{const v=flow.get(k),ts=Number(flow.get(k+'_ts'));return v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v))&&ts>0&&now-ts>=0&&now-ts<=20000&&!sf[k];});\nconst enabled=flow.get('controller_enabled')===true,paused=Number(flow.get('pause_until')||0)>now;\n// A stale health report cannot renew an export lease.\nif(req&&(!enabled||paused||!h?.ok||now-h.timestamp>15000||!fresh)){\n flow.set('discharge_request',null);flow.set('discharge_cancel',true);req=null;\n}\nlet r={action:'status'};\nif(flow.get('discharge_cancel'))r={action:'stop'};\nelse if(req)r={action:'pulse',...req};\n// Base64 contains no shell metacharacters. No Telegram text reaches the exec command.\nmsg.payload=Buffer.from(JSON.stringify(r)).toString('base64');\nreturn msg;\n",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 2760,
+    "wires": [
+      [
+        "v283_exec"
+      ]
+    ]
+  },
+  {
+    "id": "v283_tick",
+    "type": "inject",
+    "z": "cbb68a3d67f841a3",
+    "name": "Discharge helper heartbeat / 5s",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "5",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 8,
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 2760,
+    "wires": [
+      [
+        "v283_request"
+      ]
+    ]
+  },
+  {
+    "id": "v283_exec",
+    "type": "exec",
+    "z": "cbb68a3d67f841a3",
+    "name": "Local Unix socket client (no network)",
+    "command": "python3 /data/solar-discharge/bridge.py client",
+    "addpay": "payload",
+    "append": "",
+    "useSpawn": "false",
+    "timer": "15",
+    "winHide": false,
+    "oldrc": false,
+    "x": 750,
+    "y": 2760,
+    "wires": [
+      [
+        "v283_result"
+      ],
+      [],
+      []
+    ]
+  },
+  {
+    "id": "v283_result",
+    "type": "function",
+    "z": "cbb68a3d67f841a3",
+    "name": "Helper status / cancel on fault",
+    "func": "let r;try{r=JSON.parse(String(msg.payload));}catch(e){r={ok:false,error:'HELPER_INVALID_REPLY'};}\nconst now=Date.now(),old=flow.get('discharge_bridge')||{};\nif(!r.boot){\n if(flow.get('discharge_request')||old.active){flow.set('discharge_cancel',true);flow.set('discharge_request',null);}\n flow.set('discharge_bridge',{...old,ok:false,error:r.error||'HELPER_UNAVAILABLE',timestamp:now});\n return {payload:now};\n}\nflow.set('discharge_bridge',{...r,timestamp:now});\nif(r.restoring)flow.set('discharge_cancel',true);\nif(!r.active){flow.set('discharge_request',null);if(!r.restoring)flow.set('discharge_cancel',false);}\nif(r.requestError){flow.set('discharge_request',null);if(r.active)flow.set('discharge_cancel',true);}\nif(old.active&&!r.active||r.requestError){\n const q=flow.get('controller_events')||[];\n q.push({ts:now,kind:'DISCHARGE_END',detail:'Descarcare fortata: '+(r.requestError||r.reason||r.error)+'. Revenire la ESS normal; acesta poate alimenta in continuare consumatorii din baterie.'});\n flow.set('controller_events',q.slice(-40));\n}\nnode.status({fill:r.active?'yellow':r.ok?'green':'red',shape:'dot',text:r.active?'Descarcare '+r.currentA+' / '+r.amps+' A':r.reason||r.error});\nreturn {payload:now};\n",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1050,
+    "y": 2760,
+    "wires": [
+      [
+        "c6ab3c4a488844e7"
+      ]
+    ]
+  }
+]

@@ -1,0 +1,41 @@
+# Local secrets / environment
+.env
+.env.*
+!.env.example
+*.secret
+*.secrets
+secrets/
+
+# Node-RED local/runtime credentials
+flows_cred.json
+*_cred.json
+.settings.js
+
+# Local deployment/config overrides
+config.local.*
+*.local.json
+*.local.yaml
+*.local.yml
+
+# Python / tests
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / tooling
+node_modules/
+npm-debug.log*
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Generated packages / logs
+*.zip
+*.tar.gz
+*.log
+coverage/

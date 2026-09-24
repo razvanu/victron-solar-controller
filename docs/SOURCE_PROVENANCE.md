@@ -13,6 +13,7 @@ Repository organization changes:
 
 - `service/bridge.py` SHA-256: `6e3e10b556107d8ecebfe0cb35ea869e0329c6e0f6b7a3dafb5f89ec8e0286c0` — unchanged from baseline.
 - `service/install.sh` SHA-256: `669ba0fed1074688dd2d7d4a8dfaea520a71ec5db968da406c455023f940d873` — unchanged from baseline.
-- The flow keeps the original node IDs and logic, with the supplied local Home Assistant URL and Telegram owner/chat ID replaced by placeholders.
+- The initial published v2.8.4 flow kept the original node IDs and runtime logic, with the supplied local Home Assistant URL and Telegram owner/chat ID replaced by placeholders.
+- v2.8.5 intentionally changes the SOC taper and `/force` semantics while preserving all Node-RED node IDs; see `BASELINE_DIFF.md` and `CHANGELOG.md`.
 - Documentation is reorganized and generalized for repository use.
 - Tests are newly added because the supplied archive did not contain the historical simulated regression suite.

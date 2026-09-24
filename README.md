@@ -2,7 +2,7 @@
 
 Controller Node-RED pentru un sistem Victron ESS care ajusteaza plafonul DVCC `MaxChargeCurrent` pe baza forecastului solar, starii bateriei si puterii NET trifazate. Include un helper Python separat pentru sesiuni temporare de descarcare/export fortat.
 
-**Versiune de baza:** v2.8.4. Flow-ul porneste in **DRY RUN**; activarea controlului se face local in Node-RED. Repository-ul nu instaleaza automat nimic pe Cerbo GX.
+**Versiune curenta:** v2.8.5 (bazata pe v2.8.4). Flow-ul porneste in **DRY RUN**; activarea controlului se face local in Node-RED. Repository-ul nu instaleaza automat nimic pe Cerbo GX.
 
 ## Hardware / runtime validat ca tinta
 
@@ -38,6 +38,9 @@ CHANGELOG.md
 - BMS/protectiile celulelor au prioritate, inclusiv la FORCE;
 - curent normal 50 A, cu 70/100 A numai conform strategiei existente la SOC scazut;
 - `/force100` inseamna tinta SOC 100%, nu 100 A;
+- `/force <A> [minute]` foloseste amperii primul argument; exemplu `/force 50 15`;
+- FORCE ocoleste target/forecast si taperul SOC, dar nu protectiile max-cell/delta, BMS CCL, watchdog sau Grid Guard;
+- taper normal SOC: 20 A la 90-95%, apoi maxim 15 A cu scadere liniara spre 0 A la 100%;
 - nu se ruleaza simultan doua controlere sau doua pollere Telegram;
 - descarcarea fortata foloseste helperul local si override-uri ESS volatile.
 

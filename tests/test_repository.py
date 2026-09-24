@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FLOW = ROOT / "flows" / "Victron_Solar_Forecast_Charge_Controller_v2_8_4.json"
+FLOW = ROOT / "flows" / "Victron_Solar_Forecast_Charge_Controller_v2_8_5.json"
 
 BASE_BRIDGE_SHA256 = "6e3e10b556107d8ecebfe0cb35ea869e0329c6e0f6b7a3dafb5f89ec8e0286c0"
 BASE_INSTALL_SHA256 = "669ba0fed1074688dd2d7d4a8dfaea520a71ec5db968da406c455023f940d873"
@@ -60,6 +60,27 @@ class RepositoryTests(unittest.TestCase):
     def test_force100_semantics_remain_solar_only_target(self):
         controller = next(n for n in self.nodes if n.get("id") == "c6ab3c4a488844e7")["func"]
         self.assertIn("FORCE100 is a solar-only target, not a current override", controller)
+
+
+    def test_force_uses_amps_first_and_bypasses_only_soc_taper(self):
+        telegram = next(n for n in self.nodes if n.get("id") == "91b32ad72f6b4bae")["func"]
+        guard = next(n for n in self.nodes if n.get("id") == "v282_charge_guard")["func"]
+        self.assertIn('const amps=Number(args[0]),minutes=', telegram)
+        self.assertIn('/force 50 15', telegram)
+        self.assertIn("forceBypassSocTaper===true", guard)
+        self.assertIn("RAW_MAX_CELL_TAPER", guard)
+        self.assertIn("CELL_DELTA_TAPER", guard)
+
+    def test_v285_soc_taper_configuration(self):
+        f = self.config["func"]
+        for setting in (
+            "socTopTaperStartPct: 90",
+            "socTopTaperMidPct: 95",
+            "socTopTaperTo95A: 20",
+            "socTopTaperAbove95A: 15",
+            "socTopTaperEndPct: 100",
+        ):
+            self.assertIn(setting, f)
 
     def test_bridge_and_installer_match_v284_baseline(self):
         self.assertEqual(BASE_BRIDGE_SHA256, sha256(ROOT / "service" / "bridge.py"))

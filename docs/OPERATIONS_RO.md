@@ -1,6 +1,15 @@
-# Victron Solar Forecast v2.8.4 — Cerbo GX / Venus OS 3.80 Large
+# Victron Solar Forecast v2.8.5 — Cerbo GX / Venus OS 3.80 Large
 
 Pachet pentru sistem Victron Solar Forecast Controller: MultiPlus-II monofazat pe L2, ESS compensare NET trifazat, Hailei/PACE CAN device instance 512. Node-RED 4.1.11. Nu a fost testat pe un Cerbo fizic; testele sunt simulate. Importul nu incepe descarcarea.
+
+## Actualizare v2.8.5 — SOC taper si FORCE
+
+- Normal: SOC 90-95% -> plafon 20 A.
+- Peste 95% -> maxim 15 A, cu scadere liniara la 0 A la 100%: aprox. 96%=12 A, 97%=9 A, 98%=6 A, 99%=3 A.
+- `/force <A> [minute]`: `/force 50 15` = 50 A pentru 15 minute; `/force 50` = 50 A pentru 15 minute implicit.
+- FORCE ocoleste numai plafonul SOC si target/forecast. Max-cell/delta, BMS CCL, watchdog/telemetrie si Grid Guard raman active.
+- Protectiile brute raman: 3.40/3.43/3.45 V -> 10/5/2 A; delta >=50 mV cu max>=3.40 V -> 2 A; stop 3.50 V sau delta >=100 mV cu max>=3.40 V; reluare dupa 60 s safe.
+- Helperul de descarcare nu se reinstaleaza: `bridge.py` si `install.sh` nu s-au schimbat.
 
 ## Actualizare de la v2.8.3 — corectie plafon 10 A
 Eroarea era plafonul global temporar activ la orice SOC, inclusiv FORCE100. In v2.8.4 este dezactivat implicit. SOC <90% nu declanseaza taper SOC; la 90% plafonul este 10 A, la 95% 5 A, la 98% 2 A. Pragurile pe celule raman independente: max-cell >=3.40 V poate limita la 10 A chiar sub 90% SOC; limita scade la 5 A la 3.43 V si la 2 A la 3.45 V. Acestea sunt praguri preventive, sub pragul de oprire 3.50 V.
@@ -8,7 +17,7 @@ Eroarea era plafonul global temporar activ la orice SOC, inclusiv FORCE100. In v
 Daca helperul v2.8.3 este deja instalat, NU necesita reinstalare SSH: bridge.py si install.sh sunt identice. Salveaza un export al flow-ului curent. Opreste o eventuala descarcare cu /discharge off si confirma inactiv. Inlocuieste flow-ul cu JSON v2.8.4 (aceleasi ID-uri), pastreaza tokenurile/setarile locale si nu rula doua controlere. La CONFIG verifica explicit commissioningChargeCapEnabled: false, inclusiv daca ai copiat configuratia veche. Deploy, verifica /cells in DRY RUN, apoi ENABLE CONTROL si /limits. /cells trebuie sa arate Plafon temporar 10 A: INACTIV. Daca ramane 10 A, trimite /cells, /limits si /battery: pot exista alte limite active. Curentul real nu este garantat egal cu plafonul DVCC.
 
 ## Fisiere
-- `flows/Victron_Solar_Forecast_Charge_Controller_v2_8_4.json`: flow complet, porneste DRY RUN.
+- `flows/Victron_Solar_Forecast_Charge_Controller_v2_8_5.json`: flow complet, porneste DRY RUN.
 - `service/bridge.py`: client local + serviciu independent de Node-RED pentru descarcare.
 - `service/install.sh`: instalare serviciu si pornire la boot; nu descarca bateria.
 

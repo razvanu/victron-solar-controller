@@ -2,6 +2,15 @@
 
 Toate modificarile notabile ale proiectului sunt documentate aici.
 
+## v2.8.5 — 2026-09-24
+
+- Schimba sintaxa FORCE la `/force <A> [minute]`; `/force 50 15` inseamna 50 A pentru 15 minute.
+- Durata implicita pentru `/force <A>` este 15 minute.
+- FORCE ocoleste targetul/forecastul si numai taperul bazat pe SOC; max-cell/delta, BMS CCL, watchdog-ul, telemetria si Grid Guard raman obligatorii.
+- Taper normal SOC: 20 A intre 90-95%; peste 95% porneste de la 15 A si scade liniar spre 0 A la 100% (aprox. 96/97/98/99% = 12/9/6/3 A).
+- Pragurile de protectie celule raman neschimbate: max-cell 3.40/3.43/3.45 V -> 10/5/2 A; delta >=50 mV cu max-cell >=3.40 V -> 2 A; stop la 3.50 V sau delta >=100 mV cu max-cell >=3.40 V.
+- `bridge.py` si `install.sh` sunt neschimbate fata de v2.8.4.
+
 ## [2.8.4] - 2026-09-24
 
 ### Fixed

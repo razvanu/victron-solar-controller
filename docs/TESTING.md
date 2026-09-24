@@ -2,7 +2,7 @@
 
 Arhiva v2.8.4 furnizata nu continea suita istorica de teste simulate. Testele de aici sunt reconstruite ca verificari de regresie pe **codul real din flow**, plus teste ale helperului si verificari statice de repository.
 
-## Rulare
+## Rulare locala
 
 ```sh
 python3 -m unittest discover -s tests -v
@@ -46,3 +46,10 @@ python3 tests/secret_scan.py
 ## Diferenta fata de testele istorice mentionate in README-ul v2.8.4
 
 Documentatia baseline spune ca au existat simulari mai ample pentru charge guard, helper, Telegram si recuperare, dar fisierele acelei suite nu au fost incluse in arhiva. Repository-ul nu pretinde ca le-a recuperat byte-for-byte; le inlocuieste gradual cu teste versionate si reproductibile.
+
+
+## GitHub Actions
+
+`.github/workflows/tests.yml` runs `sh tests/check_all.sh` for pushes and pull requests. The workflow does not need secrets and must remain read-only with respect to repository contents.
+
+Before making the repository public, also run the checklist in `docs/PUBLIC_RELEASE_CHECKLIST.md`.

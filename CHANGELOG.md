@@ -2,6 +2,14 @@
 
 Toate modificarile notabile ale proiectului sunt documentate aici.
 
+## Unreleased — public-release preparation
+
+- Added public Home Assistant + Solcast setup documentation with exact v2.8.5 entity mappings, units, P10/P50/P90 semantics, freshness limits and REST authentication.
+- Documented the three reference daily-PV entities and four cumulative energy counters, including how other installations should replace them.
+- Rewrote README/operations text to remove stale v2.8.4 instructions and clarify current FORCE behaviour.
+- Added MIT license, public-release security checklist and GitHub Actions test workflow.
+- No controller or helper runtime logic changed in this documentation release.
+
 ## v2.8.5 — 2026-09-24
 
 - Schimba sintaxa FORCE la `/force <A> [minute]`; `/force 50 15` inseamna 50 A pentru 15 minute.

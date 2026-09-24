@@ -128,6 +128,10 @@ See [TESTING.md](docs/TESTING.md) for the release checklist.
 
 GitHub changes do **not** install themselves on the Cerbo GX.
 
+## Related Victron integrations
+
+- **[BTHome BLE sensors → Victron Virtual Temperature Sensor](integrations/bthome-sensors/)** — read unencrypted BTHome v2 temperature/humidity sensors directly on a GX device through BlueZ + Node-RED and expose them as native Venus OS temperature devices.
+
 ## Project scope
 
 This repository does not include the separate SystemCalc L2 patch or unrelated Huawei/Home Assistant projects.

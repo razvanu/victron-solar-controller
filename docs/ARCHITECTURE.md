@@ -55,7 +55,7 @@ It does not bypass:
 
 ## High-SOC / cell safety chain
 
-Normal SOC taper in v2.8.5:
+Normal SOC taper in v2.8.6:
 
 ```text
 <90%      no SOC ceiling
@@ -66,9 +66,9 @@ Normal SOC taper in v2.8.5:
 Independent raw-cell limits:
 
 ```text
-max >=3.40 V -> <=10 A
-max >=3.43 V -> <=5 A
-max >=3.45 V -> <=2 A
+max >=3.45 V -> <=10 A
+max >=3.47 V -> <=5 A
+max >=3.49 V -> <=2 A
 max >=3.50 V -> stop
 
 delta >=50 mV and max >=3.40 V -> <=2 A
@@ -99,3 +99,4 @@ com.victronenergy.hub4 /Overrides/MaxDischargePower
 ```
 
 The helper does not permanently change ESS mode, minimum SOC or the permanent grid setpoint. It does not automatically resume an old discharge session after restart.
+

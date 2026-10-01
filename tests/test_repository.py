@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FLOW = ROOT / "flows" / "Victron_Solar_Forecast_Charge_Controller_v2_8_5.json"
+FLOW = ROOT / "flows" / "Victron_Solar_Forecast_Charge_Controller_v2_8_6.json"
 
 BASE_BRIDGE_SHA256 = "6e3e10b556107d8ecebfe0cb35ea869e0329c6e0f6b7a3dafb5f89ec8e0286c0"
 BASE_INSTALL_SHA256 = "669ba0fed1074688dd2d7d4a8dfaea520a71ec5db968da406c455023f940d873"
@@ -89,3 +89,4 @@ class RepositoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -2,6 +2,15 @@
 
 Toate modificarile notabile ale proiectului sunt documentate aici.
 
+## v2.8.6 — 2026-10-01
+
+- Move raw max-cell preventive taper from 3.40/3.43/3.45 V to 3.45/3.47/3.49 V, retaining 10/5/2 A ceilings.
+- Raise the filtered battery-aware soft cell ceiling from 3.45 to 3.50 V; BMS CVL can impose a lower ceiling.
+- Keep the immediate 3.50 V stop, delta protections (50/100 mV), 60-second recovery and SOC/FORCE policies unchanged.
+- `/cells` now lists the voltage and delta taper thresholds. A 3.469/3.418 V sample remains capped at 2 A because delta is 51 mV.
+- No BMS alarm thresholds or managed battery charging voltage are changed. No guarantee of alarm-free charging or reaching 100% SOC; hardware validation remains necessary.
+- Discharge helper unchanged; existing installations do not need service reinstall.
+
 ## Unreleased — public-release preparation
 
 - Added public Home Assistant + Solcast setup documentation with exact v2.8.5 entity mappings, units, P10/P50/P90 semantics, freshness limits and REST authentication.
@@ -45,3 +54,4 @@ Toate modificarile notabile ale proiectului sunt documentate aici.
 
 ## [2.8.1]
 - Energii zilnice masurate, persistenta la 5 minute, diagnostic, Telegram/watchdog si confirmare DVCC.
+

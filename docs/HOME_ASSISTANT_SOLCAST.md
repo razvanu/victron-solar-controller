@@ -1,6 +1,6 @@
 # Home Assistant + Solcast setup
 
-This document describes the Home Assistant data contract used by `Victron_Solar_Forecast_Charge_Controller_v2_8_5.json`.
+This document describes the Home Assistant data contract used by `Victron_Solar_Forecast_Charge_Controller_v2_8_6.json`.
 
 The controller does **not** call the Solcast API directly. It periodically reads states already exposed by Home Assistant. Solcast API polling and quota management remain the responsibility of the Home Assistant Solcast integration.
 
@@ -53,7 +53,7 @@ This repository contains controller code only. It does not distribute Solcast AP
 
 ## 3. Required Solcast entities
 
-The v2.8.5 flow expects the following IDs by default:
+The v2.8.6 flow expects the following IDs by default:
 
 | Config key | Default entity ID | Unit / data used |
 | --- | --- | --- |
@@ -74,7 +74,7 @@ For the daily `Forecast Tomorrow` sensor, the flow uses the sensor state as P50 
 Entity IDs can differ after integration renames, migrations or user customisation. Verify them in **Developer Tools -> States** and then edit the CONFIG Function node:
 
 ```text
-CONFIG v2.8.5 - Telegram complet + DVCC verification
+CONFIG v2.8.6 - Telegram complet + DVCC verification
 ```
 
 Do not create duplicate entities just to match these names; changing the five config strings is enough.
@@ -205,7 +205,7 @@ Do not enable DVCC writes until forecast freshness, battery/BMS telemetry and gr
 The exact `entityTomorrow` ID is not present in `/api/states`. Check Developer Tools -> States and update CONFIG.
 
 ### Tomorrow exists but controller says stale
-Check the entity's `last_updated`. v2.8.5 allows 6 hours for Tomorrow, but only 60 minutes for Remaining Today and the power forecast sensors.
+Check the entity's `last_updated`. v2.8.6 allows 6 hours for Tomorrow, but only 60 minutes for Remaining Today and the power forecast sensors.
 
 ### P10/P90 are `N/A`
 The entity can still operate with P50, but check whether your Solcast integration exposes `estimate10` and `estimate90` attributes and whether the selected integration version/configuration has those attributes enabled.
@@ -227,3 +227,4 @@ Before publishing an exported flow, remove:
 - serial numbers, local usernames or other installation-specific secrets.
 
 The public repository intentionally ships placeholders and example entity IDs only.
+

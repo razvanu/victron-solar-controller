@@ -6,7 +6,7 @@ const path = require('path');
 const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
-const nodes = JSON.parse(fs.readFileSync(path.join(root, 'flows', 'Victron_Solar_Forecast_Charge_Controller_v2_8_5.json'), 'utf8'));
+const nodes = JSON.parse(fs.readFileSync(path.join(root, 'flows', 'Victron_Solar_Forecast_Charge_Controller_v2_8_6.json'), 'utf8'));
 const guardNode = nodes.find(n => n.id === 'v282_charge_guard');
 if (!guardNode) throw new Error('charge guard node missing');
 
@@ -50,9 +50,9 @@ const cases = [
   [{soc:99, max:3.35, min:3.34}, 3, 'SOC 99 linear taper'],
   [{soc:100, max:3.35, min:3.34}, 0, 'SOC 100 reaches zero in normal mode'],
   [{soc:99, max:3.35, min:3.34, requested:50, force:true}, 50, 'FORCE bypasses SOC taper'],
-  [{soc:99, max:3.40, min:3.39, requested:50, force:true}, 10, 'FORCE still respects 3.40V cell cap'],
-  [{soc:99, max:3.43, min:3.42, requested:50, force:true}, 5, 'FORCE still respects 3.43V cell cap'],
-  [{soc:99, max:3.45, min:3.44, requested:50, force:true}, 2, 'FORCE still respects 3.45V cell cap'],
+  [{soc:99, max:3.45, min:3.44, requested:50, force:true}, 10, 'FORCE still respects 3.45V cell cap'],
+  [{soc:99, max:3.47, min:3.46, requested:50, force:true}, 5, 'FORCE still respects 3.47V cell cap'],
+  [{soc:99, max:3.49, min:3.48, requested:50, force:true}, 2, 'FORCE still respects 3.49V cell cap'],
   [{soc:99, max:3.41, min:3.35, requested:50, force:true}, 2, 'FORCE still respects delta taper'],
   [{soc:51, max:3.50, min:3.49}, 0, '3.50V hard stop'],
   [{soc:51, max:3.50, min:3.39}, 0, 'high delta hard stop'],
@@ -71,6 +71,16 @@ assertEq(r.payload, 0, 'latched stop remains during recovery window');
 const safeSince = r.state.safeSince;
 r = runGuard({now:safeSince+60001, soc:51, max:3.42, min:3.40, state:r.state});
 assertEq(r.state.blocked, false, 'latched stop releases after 60s safe');
-assertEq(r.payload, 10, 'charge resumes under preventive 3.40V cell cap');
+assertEq(r.payload, 100, 'charge resumes below raised raw-cell taper');
 
 console.log(`PASS: ${cases.length + 3} charge-guard regression checks`);
+
+
+// Regression at the reported sample: voltage relaxation never bypasses delta.
+assertEq(runGuard({max:3.469,min:3.418,force:true}).payload,2,'reported 51mV delta still caps2');
+assertEq(runGuard({max:3.469,min:3.449,force:true}).payload,10,'balanced 3.469V caps10');
+for(const [v,expected] of [[3.4499,100],[3.45,10],[3.4699,10],[3.47,5],[3.4899,5],[3.49,2],[3.4999,2],[3.50,0],[3.51,0]]){
+ assertEq(runGuard({max:v,min:v-0.02,force:true}).payload,expected,'raw voltage boundary '+v);
+}
+assertEq(runGuard({max:3.46,min:3.35,force:true}).payload,0,'delta stop below voltage stop');
+console.log('PASS raised-voltage boundaries and unchanged delta/stop protection');

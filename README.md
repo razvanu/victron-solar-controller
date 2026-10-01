@@ -2,7 +2,7 @@
 
 Node-RED controller for Victron ESS systems that adjusts the DVCC `MaxChargeCurrent` ceiling from solar forecast, battery/BMS state and three-phase NET grid power. The project also includes an optional local Python helper for temporary forced battery discharge/export sessions.
 
-**Current release:** v2.8.5  
+**Current release:** v2.8.6  
 **Default state after import:** **DRY RUN** — no DVCC write is performed until control is enabled locally in Node-RED.
 
 > [!CAUTION]
@@ -59,7 +59,7 @@ Those three IDs are installation-specific. Other users should replace them with 
 
 See **[Home Assistant + Solcast setup](docs/HOME_ASSISTANT_SOLCAST.md)** for installation, entity mapping, REST authentication, Solcast P10/P50/P90 semantics, API-update behaviour and troubleshooting.
 
-## Charge-current policy in v2.8.5
+## Charge-current policy in v2.8.6
 
 Normal SOC taper:
 
@@ -69,7 +69,7 @@ Normal SOC taper:
 
 Independent raw-cell protection remains active:
 
-- max cell >=3.40 / 3.43 / 3.45 V -> maximum 10 / 5 / 2 A;
+- max cell >=3.45 / 3.47 / 3.49 V -> maximum 10 / 5 / 2 A;
 - delta >=50 mV while max cell >=3.40 V -> maximum 2 A;
 - stop at max cell >=3.50 V;
 - stop at delta >=100 mV while max cell >=3.40 V;
@@ -82,7 +82,7 @@ Independent raw-cell protection remains active:
 ## Repository layout
 
 ```text
-flows/      Node-RED v2.8.5 export
+flows/      Node-RED v2.8.6 export
 service/    optional forced-discharge helper and Cerbo installer
 tests/      regression, syntax and secret-scan checks
 docs/       architecture, HA/Solcast setup, operations, security, testing
@@ -122,7 +122,7 @@ See [TESTING.md](docs/TESTING.md) for the release checklist.
 
 1. Read [Home Assistant + Solcast setup](docs/HOME_ASSISTANT_SOLCAST.md).
 2. Read the Romanian operational guide: [OPERATIONS_RO.md](docs/OPERATIONS_RO.md).
-3. Import `flows/Victron_Solar_Forecast_Charge_Controller_v2_8_5.json` into Node-RED.
+3. Import `flows/Victron_Solar_Forecast_Charge_Controller_v2_8_6.json` into Node-RED.
 4. Keep it in DRY RUN until `/health`, `/cells`, `/limits`, `/battery` and forecast data are correct.
 5. Install `service/` only if you want the optional forced-discharge feature.
 
@@ -141,3 +141,4 @@ The project is not affiliated with or endorsed by Victron Energy, Home Assistant
 ## License
 
 MIT License. See [LICENSE](LICENSE).
+

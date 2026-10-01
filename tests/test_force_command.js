@@ -6,7 +6,7 @@ const path = require('path');
 const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
-const nodes = JSON.parse(fs.readFileSync(path.join(root, 'flows', 'Victron_Solar_Forecast_Charge_Controller_v2_8_5.json'), 'utf8'));
+const nodes = JSON.parse(fs.readFileSync(path.join(root, 'flows', 'Victron_Solar_Forecast_Charge_Controller_v2_8_6.json'), 'utf8'));
 const commandNode = nodes.find(n => n.id === '91b32ad72f6b4bae');
 if (!commandNode) throw new Error('Telegram command node missing');
 
@@ -62,3 +62,4 @@ assertEq(r.store.get('force_current_a'), 50, '/force 50 stores 50 A');
 assertEq(r.store.get('force_until'), r.now + 15*60000, '/force 50 uses default 15 min');
 
 console.log('PASS: /force uses amps first, minutes second/default 15');
+

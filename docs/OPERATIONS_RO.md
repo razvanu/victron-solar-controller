@@ -1,4 +1,4 @@
-# Victron Solar Forecast v2.8.5 — ghid de operare
+# Victron Solar Forecast v2.8.6 — ghid de operare
 
 Acest ghid este pentru instalarea de referinta: Cerbo GX MK2 / Venus OS Large, Node-RED 4.1.11, MultiPlus-II, ESS NET trifazat, baterie cu BMS CAN si Home Assistant + Solcast.
 
@@ -50,7 +50,7 @@ Configurarea completa, P10/P50/P90 si autentificarea REST sunt descrise in `docs
 Importa:
 
 ```text
-flows/Victron_Solar_Forecast_Charge_Controller_v2_8_5.json
+flows/Victron_Solar_Forecast_Charge_Controller_v2_8_6.json
 ```
 
 In nodul CONFIG verifica:
@@ -93,7 +93,7 @@ Nu activa controlul daca:
 - DVCC readback lipseste;
 - `/cells` arata stop/taper neasteptat.
 
-## 5. Politica de incarcare v2.8.5
+## 5. Politica de incarcare v2.8.6
 
 Normal:
 
@@ -107,9 +107,9 @@ SOC >95%       max 15 A, apoi scade liniar spre 0 A la 100%
 Protectiile de celula sunt independente de SOC:
 
 ```text
-max-cell >=3.40 V -> max 10 A
-max-cell >=3.43 V -> max 5 A
-max-cell >=3.45 V -> max 2 A
+max-cell >=3.45 V -> max 10 A
+max-cell >=3.47 V -> max 5 A
+max-cell >=3.49 V -> max 2 A
 max-cell >=3.50 V -> 0 A
 
 delta >=50 mV si max>=3.40 V -> max 2 A
@@ -122,7 +122,7 @@ BMS CCL, CVL/headroom, Grid Guard si watchdog-ul pot impune limite si mai mici.
 
 ## 6. `/force`
 
-Sintaxa v2.8.5:
+Sintaxa v2.8.6:
 
 ```text
 /force <A> [minute]
@@ -161,7 +161,7 @@ Cele trei surse PV zilnice sunt insumate numai daca toate sursele configurate su
 
 ## 8. Helper optional pentru descarcare fortata
 
-`service/bridge.py` si `service/install.sh` sunt neschimbate in v2.8.5 fata de v2.8.4. Daca helperul este deja instalat si functional, nu necesita reinstalare pentru schimbarea de flow 2.8.5.
+`service/bridge.py` si `service/install.sh` sunt neschimbate in v2.8.6 fata de v2.8.4. Daca helperul este deja instalat si functional, nu necesita reinstalare pentru schimbarea de flow 2.8.5.
 
 Pentru instalare noua:
 
@@ -226,3 +226,7 @@ svc -d /service/solar-discharge
 ## 11. Scope
 
 Patch-ul separat SystemCalc L2 nu face parte din acest repository si nu trebuie amestecat cu acest proiect.
+
+
+## Actualizare v2.8.6
+Soft ceiling este 3.50 V; BMS CVL ramane limita superioara independenta. Treptele preventive sunt 3.45/3.47/3.49 V, dar stopul de 3.50 V, delta si reluarea raman neschimbate. La 3.469/3.418 V, delta 51 mV mentine 2 A. Nu modifica pragurile BMS sau limita manuala managed battery voltage pentru a forta 100% SOC. Helperul nu necesita reinstalare. Exporta configuratia locala, importa flow-ul nou cu aceleasi ID-uri, reintrodu tokenurile/setarile locale si pastreaza DRY RUN pana la verificare. GitHub nu instaleaza automat pe Cerbo.

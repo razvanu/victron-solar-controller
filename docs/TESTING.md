@@ -20,10 +20,10 @@ python3 tests/secret_scan.py
 - un singur writer DVCC;
 - salvare energie la 300000 ms;
 - bridge/installer neschimbate fata de baza v2.8.4;
-- taper SOC v2.8.5: 90%=20 A, 95%=20 A, >95% porneste la 15 A si scade 12/9/6/3/0 A la 96/97/98/99/100%;
+- taper SOC v2.8.6: 90%=20 A, 95%=20 A, >95% porneste la 15 A si scade 12/9/6/3/0 A la 96/97/98/99/100%;
 - FORCE bypass SOC taper, dar respecta max-cell/delta;
 - parser Telegram: `/force 50 15` = 50 A / 15 minute; `/force 50` = 50 A / 15 minute implicit;
-- praguri max-cell 3.40/3.43/3.45 V;
+- praguri max-cell 3.45/3.47/3.49 V;
 - stop la 3.50 V si delta mare;
 - reluare dupa 60 s in zona sigura;
 - telemetrie stale -> 0 A;
@@ -53,3 +53,4 @@ Documentatia baseline spune ca au existat simulari mai ample pentru charge guard
 `.github/workflows/tests.yml` runs `sh tests/check_all.sh` for pushes and pull requests. The workflow does not need secrets and must remain read-only with respect to repository contents.
 
 Before making the repository public, also run the checklist in `docs/PUBLIC_RELEASE_CHECKLIST.md`.
+

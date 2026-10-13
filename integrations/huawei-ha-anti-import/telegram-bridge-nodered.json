@@ -1,0 +1,50 @@
+[
+  {
+    "id": "huawei_v2_tg_comment_20261013",
+    "type": "comment",
+    "z": "",
+    "name": "Huawei v2 MQTT -> Telegram existent / acelasi tab",
+    "info": "Configurati MQTT broker Mosquitto din HA. Legati iesirea functiei la nodul EXISTENT Telegram commands + replies (input). Nu duplicati pollerul/tokenul.",
+    "x": 240,
+    "y": 850,
+    "wires": []
+  },
+  {
+    "id": "huawei_v2_tg_mqtt_in_20261013",
+    "type": "mqtt in",
+    "z": "",
+    "name": "HA Huawei v2 events (MQTT)",
+    "topic": "home/energy/huawei/v2/events",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 250,
+    "y": 910,
+    "wires": [
+      [
+        "huawei_v2_tg_filter_20261013"
+      ]
+    ]
+  },
+  {
+    "id": "huawei_v2_tg_filter_20261013",
+    "type": "function",
+    "z": "",
+    "name": "Huawei v2 alert -> internal Telegram",
+    "func": "// Importati acest nod in ACELASI tab cu controllerul Telegram Victron.\n// Iesirea se conecteaza la nodul existent \"Telegram commands + replies\".\n// Nu introduce token/chat ID aici si NU creeaza alt poller.\nlet p=msg.payload;\nif(typeof p===\"string\"){try{p=JSON.parse(p);}catch(e){return null;}}\nif(!p||typeof p!==\"object\"||p.source!==\"huawei_v2_ha\")return null;\nconst titles={\n actual_discharge:\"Huawei descarca efectiv\",\n anti_transfer_block:\"Anti-transfer activ - Huawei blocat\",\n data_fault:\"Telemetrie invalida / veche\",\n huawei_soc_stop:\"Huawei a atins pragul de SOC\",\n anti_import_on:\"Anti-import Huawei activ\"\n};\nconst kind=String(p.event||\"\");\nif(!Object.prototype.hasOwnProperty.call(titles,kind))return null;\nconst now=Date.now(),ts=Number(p.ts)*1000;\nif(!Number.isFinite(ts)||ts>now+30000||now-ts>120000)return null;\nconst last=flow.get(\"huawei_v2_tg_bridge_last_sent\")||{};\nconst cooldown=(kind===\"data_fault\"?20:kind===\"anti_transfer_block\"?10:15)*60000;\nif(now-Number(last[kind]||0)<cooldown)return null;\nfunction n(v){const x=Number(v);return Number.isFinite(x)?String(Math.round(x)):\"N/A\";}\nlet lines=[\"HUAWEI v2 - \"+titles[kind],\n \"SOC Hailei/PACE: \"+n(p.h_soc)+\"% | Huawei: \"+n(p.hu_soc)+\"%\",\n \"Retea: \"+n(p.grid_w)+\" W (+import / -export)\",\n \"Hailei: \"+n(p.hailei_w)+\" W | Huawei: \"+n(p.huawei_w)+\" W\",\n \"Limita Huawei: \"+n(p.discharge_limit_w)+\" W\",\n \"Motiv: \"+String(p.reason||\"N/A\").slice(0,60)];\nif(kind===\"actual_discharge\")lines.push(\"Puterea Huawei negativa confirmata; nu confunda limita W cu descarcarea masurata.\");\nif(kind===\"anti_transfer_block\")lines.push(\"Protectie activa: HA import >250W, Hailei incarca; descarcare Huawei oprita preventiv.\");\nlast[kind]=now;flow.set(\"huawei_v2_tg_bridge_last_sent\",last);\nreturn {telegram_internal:true,telegram_command:\"__alert\",telegram_event_text:lines.join(\"\\n\")};",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 530,
+    "y": 910,
+    "wires": [
+      []
+    ]
+  }
+]

@@ -1,0 +1,182 @@
+{
+  "id": "915b1f2f-8748-49fc-96d3-09d8138cf9f0",
+  "alias": "Huawei v2 TEST - Anti-import shadow (fara comenzi)",
+  "description": "Simulare read-only. Citeste PACE SOC din Cerbo si curent/putere pentru ambele baterii; nu scrie in invertor, ESS, DVCC sau BMS. Actualizeaza exclusiv helperii huawei_v2_shadow_*; nu opri automatizarea veche.",
+  "triggers": [
+    {
+      "trigger": "time_pattern",
+      "seconds": "/30",
+      "id": "tick"
+    },
+    {
+      "trigger": "homeassistant",
+      "event": "start",
+      "id": "restart"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "variables": {
+        "h_soc": "{{ states('sensor.gx_device_dc_battery_charge')|float(-1) }}",
+        "hu_soc": "{{ states('sensor.batteries_state_of_capacity_2')|float(-1) }}",
+        "g": "{{ states('sensor.shellypro3em_fce8c0d9b740_total_active_power')|float(99999) }}",
+        "hp": "{{ states('sensor.gx_device_dc_battery_power')|float(99999) }}",
+        "hi": "{{ states('sensor.gx_device_dc_battery_current')|float(99999) }}",
+        "hv": "{{ states('sensor.gx_device_dc_battery_voltage')|float(99999) }}",
+        "up": "{{ states('sensor.battery_2_charge_discharge_power')|float(99999) }}",
+        "ui": "{{ states('sensor.battery_2_bus_current')|float(99999) }}",
+        "uv": "{{ states('sensor.battery_2_bus_voltage')|float(99999) }}",
+        "pv": "{{ states('sensor.fronius_5kw_power_l2')|float(-1) }}",
+        "selector": "{{ states('input_select.prioritate_descarcare_baterii') }}",
+        "res": "{{ states('input_number.huawei_soc_rezerva_prioritara')|float(80) }}",
+        "maxpri": "{{ [5000, states('input_number.huawei_putere_maxima_descarcare_prioritati')|int(5000)]|min }}",
+        "count": "{{ states('input_number.huawei_v2_shadow_contor')|int(0) }}",
+        "prior_on": "{{ is_state('input_boolean.huawei_v2_shadow_anti_import','on') }}",
+        "soc_prev": "{{ is_state('input_boolean.huawei_v2_shadow_soc_permis','on') }}",
+        "res_prev": "{{ is_state('input_boolean.huawei_v2_shadow_rezerva','on') }}",
+        "old": "{{ states('input_number.huawei_v2_shadow_putere')|int(0) }}"
+      }
+    },
+    {
+      "variables": {
+        "valid_data": "{% set ids = [\"sensor.gx_device_dc_battery_charge\",\"sensor.batteries_state_of_capacity_2\",\"sensor.shellypro3em_fce8c0d9b740_total_active_power\",\"sensor.gx_device_dc_battery_power\",\"sensor.gx_device_dc_battery_current\",\"sensor.gx_device_dc_battery_voltage\",\"sensor.battery_2_charge_discharge_power\",\"sensor.battery_2_bus_current\",\"sensor.battery_2_bus_voltage\",\"sensor.fronius_5kw_power_l2\"] %}{% set ns = namespace(ok=true) %}{% for id in ids %}{% if not is_number(states(id)) or states[id] is not defined or as_timestamp(now())-as_timestamp(states[id].last_reported,0)>90 %}{% set ns.ok=false %}{% endif %}{% endfor %}{{ ns.ok and 0<=h_soc|float(-1)<=100 and 0<=hu_soc|float(-1)<=100 and (hp|float(99999)-hi|float(99999)*hv|float(99999))|abs < [180,(hp|float(0)|abs)*0.4]|max and (up|float(99999)-ui|float(99999)*uv|float(99999))|abs < [180,(up|float(0)|abs)*0.4]|max }}",
+        "ha_charge": "{{ hp|float(99999)>120 or hi|float(99999)>2.5 }}",
+        "hu_charge": "{{ up|float(99999)>180 or ui|float(99999)>0.5 }}",
+        "soc_next": "{{ false if hu_soc|float(-1) <=15.5 else true if hu_soc|float(-1) >=17 else soc_prev }}",
+        "reserve_next": "{{ true if h_soc|float(-1)>=0 and h_soc|float(-1)<=states('input_number.hailei_soc_comutare_huawei')|float(10) else false if h_soc|float(-1)>=states('input_number.hailei_soc_revenire_primara')|float(20) else res_prev }}"
+      }
+    },
+    {
+      "variables": {
+        "gate": "{{ valid_data and soc_next and not ha_charge and not hu_charge and selector == 'Automat' and g|float(0)>-150 }}",
+        "cnt_next": "{% if not valid_data or not soc_next or ha_charge or hu_charge or selector!='Automat' or g|float(0)<-150 %}0{% elif g|float(0)>250 %}{{ [3,[count|int(0),0]|max+1]|min }}{% elif g|float(0)<80 %}{{ [-4,[count|int(0),0]|min-1]|max }}{% else %}{{ count|int(0) }}{% endif %}"
+      }
+    },
+    {
+      "variables": {
+        "anti_next": "{{ false if not gate or cnt_next|int(0)<=-4 else true if cnt_next|int(0)>=3 else prior_on }}",
+        "priority_next": "{{ valid_data and soc_next and not ha_charge and not hu_charge and (selector=='Doar Huawei' or (selector=='Automat' and (reserve_next or hu_soc|float(0)>res|float(80)))) }}"
+      }
+    },
+    {
+      "variables": {
+        "delta": "{{ [200,[-200,((g|float(0)-150)*0.7)|int]|max]|min }}",
+        "power_next": "{% if not valid_data or not soc_next or ha_charge or hu_charge or g|float(0)<-150 or selector in ['Doar Hailei','Fără descărcare','Fara descarcare'] %}0{% elif priority_next %}{{ maxpri|int(5000) }}{% elif anti_next and selector=='Automat' %}{{ [[old|int(0)+delta|int(0),0]|max,[2000,maxpri|int(5000)]|min]|min }}{% else %}0{% endif %}",
+        "reason": "{% if not valid_data %}DATA_STALE_OR_MISMATCH{% elif not soc_next %}SOC_STOP_15_5{% elif ha_charge %}HAILEI_CHARGING{% elif hu_charge %}HUAWEI_CHARGING{% elif g|float(0)<-150 %}GRID_EXPORT{% elif selector in ['Doar Hailei','Fără descărcare','Fara descarcare'] %}PRIORITY_BLOCK{% elif priority_next %}PRIORITY_HUAWEI{% elif anti_next %}ANTI_IMPORT{% else %}IDLE{% endif %}"
+      }
+    },
+    {
+      "action": "input_number.set_value",
+      "target": {
+        "entity_id": "input_number.huawei_v2_shadow_contor"
+      },
+      "data": {
+        "value": "{{ cnt_next|int(0) }}"
+      }
+    },
+    {
+      "action": "input_number.set_value",
+      "target": {
+        "entity_id": "input_number.huawei_v2_shadow_putere"
+      },
+      "data": {
+        "value": "{{ [0,[power_next|int(0),5000]|min]|max }}"
+      }
+    },
+    {
+      "action": "input_text.set_value",
+      "target": {
+        "entity_id": "input_text.huawei_v2_shadow_diagnostic"
+      },
+      "data": {
+        "value": "{{ reason|trim }} | P={{ power_next|int(0) }}W | H={{h_soc|round(1)}}% HU={{hu_soc|round(1)}}% | grid={{g|round(0)}}W | Hailei={{hp|round(0)}}W | Huawei={{up|round(0)}}W | cnt={{cnt_next|int(0)}}"
+      }
+    },
+    {
+      "choose": [
+        {
+          "conditions": [
+            {
+              "condition": "template",
+              "value_template": "{{ soc_next }}"
+            }
+          ],
+          "sequence": [
+            {
+              "action": "input_boolean.turn_on",
+              "target": {
+                "entity_id": "input_boolean.huawei_v2_shadow_soc_permis"
+              }
+            }
+          ]
+        }
+      ],
+      "default": [
+        {
+          "action": "input_boolean.turn_off",
+          "target": {
+            "entity_id": "input_boolean.huawei_v2_shadow_soc_permis"
+          }
+        }
+      ]
+    },
+    {
+      "choose": [
+        {
+          "conditions": [
+            {
+              "condition": "template",
+              "value_template": "{{ reserve_next }}"
+            }
+          ],
+          "sequence": [
+            {
+              "action": "input_boolean.turn_on",
+              "target": {
+                "entity_id": "input_boolean.huawei_v2_shadow_rezerva"
+              }
+            }
+          ]
+        }
+      ],
+      "default": [
+        {
+          "action": "input_boolean.turn_off",
+          "target": {
+            "entity_id": "input_boolean.huawei_v2_shadow_rezerva"
+          }
+        }
+      ]
+    },
+    {
+      "choose": [
+        {
+          "conditions": [
+            {
+              "condition": "template",
+              "value_template": "{{ anti_next }}"
+            }
+          ],
+          "sequence": [
+            {
+              "action": "input_boolean.turn_on",
+              "target": {
+                "entity_id": "input_boolean.huawei_v2_shadow_anti_import"
+              }
+            }
+          ]
+        }
+      ],
+      "default": [
+        {
+          "action": "input_boolean.turn_off",
+          "target": {
+            "entity_id": "input_boolean.huawei_v2_shadow_anti_import"
+          }
+        }
+      ]
+    }
+  ],
+  "mode": "single"
+}

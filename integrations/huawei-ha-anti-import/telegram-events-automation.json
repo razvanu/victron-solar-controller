@@ -1,0 +1,67 @@
+{
+  "alias": "Huawei v2 - evenimente Telegram prin MQTT (bridge Cerbo)",
+  "description": "Publishes notification events; no Huawei, ESS, DVCC or BMS writes.",
+  "triggers": [
+    {
+      "trigger": "template",
+      "value_template": "{{ is_state('input_boolean.huawei_v2_permitere_control','on') and is_state('automation.huawei_v2_control_staged_disabled','on') and is_state('automation.prioritate_baterii_hailei_huawei_control_descarcare','off') and states('number.batteries_maximum_discharging_power_2')|float(0)>200 and states('sensor.battery_2_charge_discharge_power')|float(0)<-200 }}",
+      "for": "00:00:30",
+      "id": "actual_discharge"
+    },
+    {
+      "trigger": "template",
+      "value_template": "{{ is_state('input_boolean.huawei_v2_permitere_control','on') and is_state('automation.huawei_v2_control_staged_disabled','on') and is_state('automation.prioritate_baterii_hailei_huawei_control_descarcare','off') and states('input_text.huawei_v2_shadow_diagnostic').split(' | ')[0]=='HAILEI_CHARGING' and states('sensor.shellypro3em_fce8c0d9b740_total_active_power')|float(0)>250 }}",
+      "for": "00:01:00",
+      "id": "anti_transfer_block"
+    },
+    {
+      "trigger": "template",
+      "value_template": "{{ is_state('input_boolean.huawei_v2_permitere_control','on') and is_state('automation.huawei_v2_control_staged_disabled','on') and is_state('automation.prioritate_baterii_hailei_huawei_control_descarcare','off') and states('input_text.huawei_v2_shadow_diagnostic').split(' | ')[0]=='DATA_STALE_OR_MISMATCH' }}",
+      "for": "00:01:00",
+      "id": "data_fault"
+    },
+    {
+      "trigger": "template",
+      "value_template": "{{ is_state('input_boolean.huawei_v2_permitere_control','on') and is_state('automation.huawei_v2_control_staged_disabled','on') and is_state('automation.prioritate_baterii_hailei_huawei_control_descarcare','off') and is_number(states('sensor.batteries_state_of_capacity_2')) and states('sensor.batteries_state_of_capacity_2')|float(100)<=15.5 }}",
+      "for": "00:00:30",
+      "id": "huawei_soc_stop"
+    },
+    {
+      "trigger": "template",
+      "value_template": "{{ is_state('input_boolean.huawei_v2_permitere_control','on') and is_state('automation.huawei_v2_control_staged_disabled','on') and is_state('automation.prioritate_baterii_hailei_huawei_control_descarcare','off') and is_state('input_boolean.huawei_v2_shadow_anti_import','on') }}",
+      "for": "00:00:30",
+      "id": "anti_import_on"
+    }
+  ],
+  "conditions": [
+    {
+      "condition": "state",
+      "entity_id": "input_boolean.huawei_v2_permitere_control",
+      "state": "on"
+    },
+    {
+      "condition": "state",
+      "entity_id": "automation.huawei_v2_control_staged_disabled",
+      "state": "on"
+    },
+    {
+      "condition": "state",
+      "entity_id": "automation.prioritate_baterii_hailei_huawei_control_descarcare",
+      "state": "off"
+    }
+  ],
+  "actions": [
+    {
+      "action": "mqtt.publish",
+      "data": {
+        "topic": "home/energy/huawei/v2/events",
+        "qos": 1,
+        "retain": false,
+        "payload": "{% set id=trigger.id %}{% set labels={'actual_discharge':'Huawei descarca efectiv','anti_transfer_block':'Anti-transfer blocheaza Huawei','data_fault':'Date senzor nevalide','huawei_soc_stop':'Huawei la pragul SOC','anti_import_on':'Mod anti-import activ'} %}{{ dict(source='huawei_v2_ha', event=id, ts=as_timestamp(now())|int, title=labels.get(id,id), h_soc=states('sensor.gx_device_dc_battery_charge')|float(-1), hu_soc=states('sensor.batteries_state_of_capacity_2')|float(-1), grid_w=states('sensor.shellypro3em_fce8c0d9b740_total_active_power')|float(0)|round(0), hailei_w=states('sensor.gx_device_dc_battery_power')|float(0)|round(0), huawei_w=states('sensor.battery_2_charge_discharge_power')|float(0)|round(0), discharge_limit_w=states('number.batteries_maximum_discharging_power_2')|float(0)|round(0), reason=states('input_text.huawei_v2_shadow_diagnostic').split(' | ')[0])|to_json }}"
+      }
+    }
+  ],
+  "mode": "queued",
+  "max": 3,
+  "id": "fb989d3e-d40d-47ec-9480-e0074a2186f0"
+}

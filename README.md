@@ -132,6 +132,8 @@ GitHub changes do **not** install themselves on the Cerbo GX.
 
 - **[BTHome BLE sensors → Victron Virtual Temperature Sensor](integrations/bthome-sensors/)** — read unencrypted BTHome v2 temperature/humidity sensors directly on a GX device through BlueZ + Node-RED and expose them as native Venus OS temperature devices.
 
+- **[Huawei + Hailei anti-import (Home Assistant)](integrations/huawei-ha-anti-import/)** — separable HA subproject for SOC-priority, shadow-tested grid anti-import and cross-battery transfer guards; the new Huawei power writer stays disabled until real-world acceptance tests.
+
 ## Project scope
 
 This repository does not include the separate SystemCalc L2 patch or unrelated Huawei/Home Assistant projects.

@@ -26,8 +26,9 @@ function harness(){
 }
 function stateData(h,{power=0,soc=80,reportedAge=0,updatedAge=0,unit='W'}={}){
  const date=age=>new Date(h.now-age).toISOString();
- return [{entity_id:h.cfg.entityHuaweiSoc,state:String(soc),last_reported:date(reportedAge),last_updated:date(updatedAge)},
- {entity_id:h.cfg.entityHuaweiBatteryPower,state:String(power),attributes:{unit_of_measurement:unit},last_reported:date(reportedAge),last_updated:date(updatedAge)},
+ const proof={huawei_read_protocol:1,huawei_read_ok:true,huawei_last_successful_read:date(reportedAge)};
+ return [{entity_id:h.cfg.entityHuaweiSoc,state:String(soc),attributes:{...proof},last_reported:date(reportedAge),last_updated:date(updatedAge)},
+ {entity_id:h.cfg.entityHuaweiBatteryPower,state:String(power),attributes:{unit_of_measurement:unit,...proof},last_reported:date(reportedAge),last_updated:date(updatedAge)},
  {entity_id:h.cfg.entityHaileiSoc,state:'8',last_reported:date(reportedAge)},
  {entity_id:h.cfg.entityBatteryPriority,state:'Automat',last_updated:date(86400000)}];
 }
@@ -53,7 +54,7 @@ h=harness();h.cfg.antiTransferHuaweiDischargeSign=3;eq(h.plan().antiTransfer.rea
 h=harness();h.run('Parse Solcast',{payload:stateData(h,{power:2,unit:'kW'})});eq(h.m.get('at_huawei_power'),2000,'kW normalized');eq(h.plan().antiTransfer.blocked,true,'power unknown polarity');
 h=harness();h.run('Parse Solcast',{payload:stateData(h,{reportedAge:200000})});eq(h.m.get('at_huawei_soc_ts'),h.now-200000,'REST does not refresh stale sensor');eq(h.plan().antiTransfer.blocked,true,'stale source fails closed');
 h=harness();h.run('Parse Solcast',{payload:stateData(h,{updatedAge:86400000})});eq(h.plan().antiTransfer.blocked,false,'fresh unchanged reported value accepted');
-h=harness();let a=stateData(h);delete a[0].last_reported;a[0].last_updated=new Date(h.now-1000).toISOString();h.run('Parse Solcast',{payload:a});eq(h.m.get('at_huawei_soc_ts'),h.now-1000,'last_updated fallback');
+h=harness();let a=stateData(h);delete a[0].last_reported;a[0].last_updated=new Date(h.now-1000).toISOString();a[0].attributes.huawei_last_successful_read=new Date(h.now-1000).toISOString();h.run('Parse Solcast',{payload:a});eq(h.m.get('at_huawei_soc_ts'),h.now-1000,'hardware confirmation independent of last_reported');
 h=harness();h.run('Parse Solcast',{payload:stateData(h,{unit:'VA'})});eq(h.m.get('at_huawei_power'),null,'unknown units invalid');
 h=harness();h.run('Parse Solcast',{payload:{error:true}});eq(h.m.get('at_priority'),null,'invalid REST clears priority');
 h=harness();h.run('HA unavailable',{payload:'failure'});eq(h.m.get('at_huawei_soc_ts'),0,'HA failure clears timestamps');

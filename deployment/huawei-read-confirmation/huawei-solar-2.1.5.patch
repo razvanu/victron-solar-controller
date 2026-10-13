@@ -1,0 +1,94 @@
+diff --git a/sensor.py b/sensor.py
+index 3cd2b53..3704f97 100644
+--- a/sensor.py
++++ b/sensor.py
+@@ -1,5 +1,6 @@
+ """Support for Huawei inverter monitoring API."""
+ 
++import math
+ from collections.abc import Callable
+ from dataclasses import dataclass
+ from typing import Any
+@@ -62,6 +63,18 @@ from .update_coordinator import (
+ 
+ PARALLEL_UPDATES = 1
+ 
++# Read confirmation is attached to the value it confirms, never to a proxy sensor.
++_READ_CONFIRMED_BATTERY_REGISTERS = frozenset({
++    rn.STORAGE_STATE_OF_CAPACITY,
++    rn.STORAGE_CHARGE_DISCHARGE_POWER,
++    rn.STORAGE_UNIT_1_STATE_OF_CAPACITY,
++    rn.STORAGE_UNIT_2_STATE_OF_CAPACITY,
++    rn.STORAGE_UNIT_1_CHARGE_DISCHARGE_POWER,
++    rn.STORAGE_UNIT_2_CHARGE_DISCHARGE_POWER,
++    rn.STATE_OF_CAPACITY,
++    rn.BATTERY_CHARGE_DISCHARGE_POWER,
++})
++
+ 
+ @dataclass(frozen=True)
+ class HuaweiSolarSensorEntityDescription(
+@@ -2334,6 +2347,24 @@ class HuaweiSolarSensorEntity(
+             self._attr_available = False
+             self._attr_native_value = None
+ 
++        if self._register_key in _READ_CONFIRMED_BATTERY_REGISTERS:
++            read_at = self.coordinator.last_successful_read.get(self._register_key)
++            value = self._attr_native_value
++            read_ok = (
++                self.coordinator.last_update_success
++                and self._attr_available
++                and read_at is not None
++                and isinstance(value, (int, float))
++                and not isinstance(value, bool)
++                and math.isfinite(value)
++            )
++            self._attr_extra_state_attributes = {
++                "huawei_read_protocol": 1,
++                "huawei_read_ok": bool(read_ok),
++                "huawei_last_successful_read": read_at.isoformat() if read_ok else None,
++                "huawei_read_register": str(self._register_key),
++            }
++
+         self.async_write_ha_state()
+ 
+ 
+diff --git a/update_coordinator.py b/update_coordinator.py
+index 524d6c4..4a34726 100644
+--- a/update_coordinator.py
++++ b/update_coordinator.py
+@@ -2,7 +2,7 @@
+ 
+ import asyncio
+ from collections.abc import Awaitable, Callable
+-from datetime import timedelta
++from datetime import UTC, datetime, timedelta
+ from itertools import chain
+ import logging
+ from typing import Any
+@@ -59,14 +59,24 @@ class HuaweiSolarUpdateCoordinator(
+         )
+         self.device = device
+         self.update_timeout = update_timeout
++        # Only registers returned by the latest hardware read are confirmed.
++        self.last_successful_read: dict[RegisterName, datetime] = {}
+ 
+     async def _async_update_data(self) -> dict[RegisterName, Result[Any]]:
+         register_names_set = set(
+             chain.from_iterable(ctx["register_names"] for ctx in self.async_contexts())
+         )
++        self.last_successful_read = {}
+         try:
+             async with asyncio.timeout(self.update_timeout.total_seconds()):
+-                return await self.device.batch_update(list(register_names_set))
++                # Use the beginning of the batch as a conservative age bound.
++                # Completion time would hide time spent reading other registers.
++                read_started_at = datetime.now(UTC)
++                data = await self.device.batch_update(list(register_names_set))
++                self.last_successful_read = {
++                    key: read_started_at for key in register_names_set if key in data
++                }
++                return data
+         except TimeoutError as err:
+             raise UpdateFailed(
+                 f"Timeout communicating with {self.device.serial_number}: "

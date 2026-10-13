@@ -1,0 +1,12 @@
+{
+  "description": "Helpers nou create in HA pentru subproiectul Huawei v2",
+  "entities": {
+    "input_text.huawei_v2_shadow_diagnostic": "Diagnosticul calculat (max 255 caractere)",
+    "input_number.huawei_v2_shadow_putere": "Puterea Huawei simulata in W, fara actuatia invertorului",
+    "input_number.huawei_v2_shadow_contor": "Contor -4...3, evaluat la 30s",
+    "input_boolean.huawei_v2_shadow_anti_import": "Anti-import calculat (nu mod real)",
+    "input_boolean.huawei_v2_shadow_soc_permis": "Latch SOC Huawei stop 15.5 / restart 17",
+    "input_boolean.huawei_v2_shadow_rezerva": "Latch Hailei <=10% / >=20%",
+    "input_boolean.huawei_v2_permitere_control": "Interlock OFF pana la cutover"
+  }
+}

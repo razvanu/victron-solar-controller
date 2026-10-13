@@ -8,6 +8,7 @@ node tests/test_charge_guard.js
 node tests/test_force_command.js
 node tests/test_pace_top_charge.js
 node tests/test_balance_bms_limits.js
+node tests/test_v2_8_10_anti_transfer.js
 python3 tests/secret_scan.py
 sh -n service/install.sh
 python3 -m py_compile service/bridge.py

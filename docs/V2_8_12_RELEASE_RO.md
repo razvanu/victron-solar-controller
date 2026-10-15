@@ -11,7 +11,7 @@ Raport real: SOC Hailei11%, LUNA71%, putere Huawei+2895W cu semn descarcare-1 (d
 - LUNA incarcand sau in repaus permite incarcarea Hailei, sub plafonul real din surplus si celelalte protectii.
 - LUNA descarcand peste50W cere imediat DVCC0A, chiar daca Hailei nu a inceput inca sa incarce.
 - Dupa o descarcare detectata, reluare numai la putere de descarcare<=20W (sau incarcare LUNA) stabil15s. Gap de executie>10s / date invalide reseteaza observatia.
-- Semn Huawei implicit0, necunoscut: puterea ne-idle blocheaza conservator. Configurati local -1 numai daca ati confirmat pozitiv=incarcare/negativ=descarcare, cum este in raportul utilizatorului. Configurarea nu se ghiceste.
+- Semn Huawei preconfigurat -1 pentru instalatia confirmata: pozitiv=incarcare LUNA, negativ=descarcare. Confirmare live 15.10.2026: +759W, HUAWEI_CHARGING_ALLOWED, Hailei +6.8A. Pastrati aceasta setare la reimport. Pentru alte instalatii, verificati sensul; valoarea0 ramane necunoscuta si blocheaza conservator la putere ne-idle.
 - Puterea Huawei necesita in continuare confirmarea Modbus de la patch-ul instalat: protocol1, read_ok=true, last_successful_read valid si varsta<=150s. Nu pretinde independenta de HA; cititorul direct pe Cerbo este proiect separat, neimplementat aici.
 - Transferul invers Hailei->LUNA este doar diagnostic. Userul a dezactivat incarcare Huawei din retea in FusionSolar; acest flux nu modifica setarea si nu presupune ca ea impiedica LUNA->Hailei.
 

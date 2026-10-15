@@ -10,6 +10,8 @@ node tests/test_pace_top_charge.js
 node tests/test_balance_bms_limits.js
 node tests/test_v2_8_10_anti_transfer.js
 node tests/test_release_balance.js Victron_Solar_Forecast_Charge_Controller_v2_8_10_anti_transfer.json Victron_Solar_Forecast_Charge_Controller_v2_8_11.json
+node tests/test_v2_8_12_recharge.js
+node tests/test_release_balance.js Victron_Solar_Forecast_Charge_Controller_v2_8_12.json
 node tests/test_v2_8_11_telemetry.js
 node tests/test_huawei_read_confirmation.js
 python3 deployment/huawei-read-confirmation/custom_components/huawei_solar/test_read_confirmation.py

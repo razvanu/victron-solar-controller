@@ -225,7 +225,7 @@ svc -d /service/solar-discharge
 
 ## 11. Scope
 
-Patch-ul separat SystemCalc L2 nu face parte din acest repository si nu trebuie amestecat cu acest proiect.
+Patch-ul separat SystemCalc L2 nu face parte din acest repository. Din 2026-11-08 MultiPlus este pe L1, deci patch-ul este inutil si NU trebuie reaplicat (ar declara invertorul pe faza gresita). Vezi docs/PHASE_MOVE_L1_2026-11-08_RO.md.
 
 
 ## Actualizare v2.8.6

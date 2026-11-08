@@ -1,0 +1,82 @@
+{
+  "id": "18e79a77-d2e7-4da3-b990-1b00231620d9",
+  "alias": "Huawei v2 CONTROL - STAGED (disabled)",
+  "description": "NEACTIVAT: permitere-control OFF si automatizarea veche trebuie OFF; protectie dual-writer. La activare, urmareste shadow valid si comanda numai puterea Huawei, fara modificari ESS/DVCC/BMS. Nu porni pana la validarea pe scenarii reale.",
+  "triggers": [
+    {
+      "trigger": "time_pattern",
+      "seconds": "/30",
+      "id": "tick"
+    },
+    {
+      "trigger": "state",
+      "entity_id": [
+        "sensor.gx_device_dc_battery_power",
+        "sensor.battery_2_charge_discharge_power",
+        "sensor.batteries_state_of_capacity_2",
+        "sensor.shellypro3em_fce8c0d9b740_total_active_power",
+        "input_select.prioritate_descarcare_baterii"
+      ],
+      "id": "safety"
+    },
+    {
+      "trigger": "homeassistant",
+      "event": "start",
+      "id": "restart"
+    }
+  ],
+  "conditions": [
+    {
+      "condition": "state",
+      "entity_id": "input_boolean.huawei_v2_permitere_control",
+      "state": "on"
+    },
+    {
+      "condition": "state",
+      "entity_id": "automation.prioritate_baterii_hailei_huawei_control_descarcare",
+      "state": "off"
+    }
+  ],
+  "actions": [
+    {
+      "variables": {
+        "valid": "{% set ids=['sensor.gx_device_dc_battery_charge','sensor.batteries_state_of_capacity_2','sensor.shellypro3em_fce8c0d9b740_total_active_power','sensor.gx_device_dc_battery_power','sensor.gx_device_dc_battery_current','sensor.gx_device_dc_battery_voltage','sensor.battery_2_charge_discharge_power','sensor.battery_2_bus_current','sensor.battery_2_bus_voltage'] %}{% set ns=namespace(ok=true) %}{% for id in ids %}{% if not is_number(states(id)) or states[id] is not defined or as_timestamp(now())-as_timestamp(states[id].last_reported,0)>90 %}{% set ns.ok=false %}{% endif %}{% endfor %}{{ ns.ok }}",
+        "hailei_p": "{{states('sensor.gx_device_dc_battery_power')|float(99999)}}",
+        "hailei_i": "{{states('sensor.gx_device_dc_battery_current')|float(99999)}}",
+        "huawei_p": "{{states('sensor.battery_2_charge_discharge_power')|float(99999)}}",
+        "huawei_i": "{{states('sensor.battery_2_bus_current')|float(99999)}}",
+        "grid": "{{states('sensor.shellypro3em_fce8c0d9b740_total_active_power')|float(-99999)}}",
+        "huawei_soc": "{{states('sensor.batteries_state_of_capacity_2')|float(-1)}}",
+        "report_age": "{{as_timestamp(now())-as_timestamp(states['input_text.huawei_v2_shadow_diagnostic'].last_reported,0)}}",
+        "shadow_power": "{{states('input_number.huawei_v2_shadow_putere')|int(0)}}",
+        "old_power": "{{states('number.batteries_maximum_discharging_power_2')|int(0)}}"
+      }
+    },
+    {
+      "variables": {
+        "safe": "{{ valid and report_age|float(9999)<75 and huawei_soc|float(-1)>15.5 and is_state('input_boolean.huawei_v2_shadow_soc_permis','on') and hailei_p|float(99999)<=120 and hailei_i|float(99999)<=2.5 and huawei_p|float(99999)<=180 and huawei_i|float(99999)<=0.5 and grid|float(-99999)>-150 and is_state('input_boolean.prioritate_baterii_automata','on') and not is_state('switch.batteries_charge_from_grid_2','on') }}",
+        "command": "{{ [0,[shadow_power|int(0),5000]|min]|max if safe else 0 }}"
+      }
+    },
+    {
+      "if": [
+        {
+          "condition": "template",
+          "value_template": "{{ command|int(0)!=old_power|int(0) and (command|int(0)==0 or (command|int(0)-old_power|int(0))|abs>=20) }}"
+        }
+      ],
+      "then": [
+        {
+          "action": "number.set_value",
+          "target": {
+            "entity_id": "number.batteries_maximum_discharging_power_2"
+          },
+          "data": {
+            "value": "{{command|int(0)}}"
+          }
+        }
+      ]
+    }
+  ],
+  "mode": "restart"
+}

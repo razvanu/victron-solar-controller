@@ -225,4 +225,4 @@ svc -d /service/solar-discharge
 
 ## 11. Scope
 
-Patch-ul separat SystemCalc L2 nu face parte din acest repository si nu trebuie amestecat cu acest proiect.
+Patch-ul separat SystemCalc L2 nu face parte din acest repository. Din 2026-11-08 MultiPlus este pe L1, deci patch-ul este inutil si NU trebuie reaplicat.

@@ -21,7 +21,7 @@ Acest subproiect este separat logic de **Victron Solar Forecast Controller** pen
 | Hailei P, I, V | `sensor.gx_device_dc_battery_power`, `sensor.gx_device_dc_battery_current`, `sensor.gx_device_dc_battery_voltage` | **P/I pozitive = încărcare** |
 | Huawei P, I, V (bus) | `sensor.battery_2_charge_discharge_power`, `sensor.battery_2_bus_current`, `sensor.battery_2_bus_voltage` | **P/I pozitive = încărcare** (verificat și cu contoarele de energie); descărcarea cu semn negativ necesită confirmare pe interval real |
 | Grid NET | `sensor.shellypro3em_fce8c0d9b740_total_active_power` | **+ import, − export** |
-| Fronius PV L2 | `sensor.fronius_5kw_power_l2` | W, doar diagnostic / disponibilitate; **nu** autorizează momentan depășirea gardului anti-transfer |
+| Fronius PV L1 (din 2026-11-08; anterior L2) | `sensor.camera_tehnica_fronius_5kw_power_l1` | W, doar diagnostic / disponibilitate; **nu** autorizează momentan depășirea gardului anti-transfer |
 | Prioritate | `input_select.prioritate_descarcare_baterii` | Automat / Doar Huawei / Doar Hailei / Fără descărcare |
 | Limită descărcare Huawei | `number.batteries_maximum_discharging_power_2` | **singura comandă de putere** a noului controller staged |
 

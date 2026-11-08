@@ -15,6 +15,6 @@ Use this before changing repository visibility from private to public.
 - [ ] `LICENSE` is present.
 - [ ] GitHub Actions test workflow is present.
 - [ ] Public issue/README text makes clear that hardware validation is the user's responsibility.
-- [ ] The separate SystemCalc L2 patch is not present.
+- [ ] The separate SystemCalc L2 patch is not present (obsolete since the MultiPlus moved to L1).
 
 Changing visibility is a separate administrative action; completing this checklist does not change it automatically.

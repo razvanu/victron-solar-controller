@@ -16,7 +16,7 @@
 3. Testează anti-transfer: Hailei charge >120W / >2,5A, Huawei charge >180W / >0,5A, grid export <−150W. Shadow comandă 0W, fără comandă reală.
 4. Testează revenirea sub 80W pentru 4 tick-uri, oscilații în jurul pragului și stale sensor >90s.
 5. Testează starea de SOC 15,5–17% (simularea verificată); validare fizică numai când e sigur pentru baterie.
-6. Observă diagnosticul cel puțin un ciclu zi/noapte și compară cu sistemul existent; în special PV Fronius pe L2 și compensarea trifazată.
+6. Observă diagnosticul cel puțin un ciclu zi/noapte și compară cu sistemul existent; în special PV Fronius pe L1 (mutat de pe L2 la 2026-11-08) și compensarea trifazată.
 7. Înainte de cutover, confirmă PACE CAN CCL/DCL/CVL, ESS minimum SOC 10%, EOD Huawei 15%, `Charge from grid=off`; verifică lipsa scriitorilor suplimentari către numărul Huawei.
 
 ## Protocol de cutover (NU a fost executat)

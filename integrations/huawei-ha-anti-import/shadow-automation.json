@@ -27,7 +27,7 @@
         "up": "{{ states('sensor.battery_2_charge_discharge_power')|float(99999) }}",
         "ui": "{{ states('sensor.battery_2_bus_current')|float(99999) }}",
         "uv": "{{ states('sensor.battery_2_bus_voltage')|float(99999) }}",
-        "pv": "{{ states('sensor.fronius_5kw_power_l2')|float(-1) }}",
+        "pv": "{{ states('sensor.camera_tehnica_fronius_5kw_power_l1')|float(-1) }}",
         "selector": "{{ states('input_select.prioritate_descarcare_baterii') }}",
         "res": "{{ states('input_number.huawei_soc_rezerva_prioritara')|float(80) }}",
         "maxpri": "{{ [5000, states('input_number.huawei_putere_maxima_descarcare_prioritati')|int(5000)]|min }}",
@@ -40,7 +40,7 @@
     },
     {
       "variables": {
-        "valid_data": "{% set ids = [\"sensor.gx_device_dc_battery_charge\",\"sensor.batteries_state_of_capacity_2\",\"sensor.shellypro3em_fce8c0d9b740_total_active_power\",\"sensor.gx_device_dc_battery_power\",\"sensor.gx_device_dc_battery_current\",\"sensor.gx_device_dc_battery_voltage\",\"sensor.battery_2_charge_discharge_power\",\"sensor.battery_2_bus_current\",\"sensor.battery_2_bus_voltage\",\"sensor.fronius_5kw_power_l2\"] %}{% set ns = namespace(ok=true) %}{% for id in ids %}{% if not is_number(states(id)) or states[id] is not defined or as_timestamp(now())-as_timestamp(states[id].last_reported,0)>90 %}{% set ns.ok=false %}{% endif %}{% endfor %}{{ ns.ok and 0<=h_soc|float(-1)<=100 and 0<=hu_soc|float(-1)<=100 and (hp|float(99999)-hi|float(99999)*hv|float(99999))|abs < [180,(hp|float(0)|abs)*0.4]|max and (up|float(99999)-ui|float(99999)*uv|float(99999))|abs < [180,(up|float(0)|abs)*0.4]|max }}",
+        "valid_data": "{% set ids = [\"sensor.gx_device_dc_battery_charge\",\"sensor.batteries_state_of_capacity_2\",\"sensor.shellypro3em_fce8c0d9b740_total_active_power\",\"sensor.gx_device_dc_battery_power\",\"sensor.gx_device_dc_battery_current\",\"sensor.gx_device_dc_battery_voltage\",\"sensor.battery_2_charge_discharge_power\",\"sensor.battery_2_bus_current\",\"sensor.battery_2_bus_voltage\",\"sensor.camera_tehnica_fronius_5kw_power_l1\"] %}{% set ns = namespace(ok=true) %}{% for id in ids %}{% if not is_number(states(id)) or states[id] is not defined or as_timestamp(now())-as_timestamp(states[id].last_reported,0)>90 %}{% set ns.ok=false %}{% endif %}{% endfor %}{{ ns.ok and 0<=h_soc|float(-1)<=100 and 0<=hu_soc|float(-1)<=100 and (hp|float(99999)-hi|float(99999)*hv|float(99999))|abs < [180,(hp|float(0)|abs)*0.4]|max and (up|float(99999)-ui|float(99999)*uv|float(99999))|abs < [180,(up|float(0)|abs)*0.4]|max }}",
         "ha_charge": "{{ hp|float(99999)>120 or hi|float(99999)>2.5 }}",
         "hu_charge": "{{ up|float(99999)>180 or ui|float(99999)>0.5 }}",
         "soc_next": "{{ false if hu_soc|float(-1) <=15.5 else true if hu_soc|float(-1) >=17 else soc_prev }}",

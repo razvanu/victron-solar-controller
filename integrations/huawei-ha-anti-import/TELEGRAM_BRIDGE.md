@@ -30,7 +30,7 @@ Conditie comuna: v2 permitere control ON, automatizarea v2 CONTROL ON, controlul
 
 1. Deschideti tabul **Solar Forecast Charge Controller v2.8.10** in Node-RED de pe Cerbo (nu creati un tab separat, deoarece `flow.get('solar_cfg')` si `alerts_enabled` sunt context local de tab).
 2. Menu -> Import -> selectati `telegram-bridge-nodered.json` -> import in **current flow**.
-3. Deschideti nodul **HA Huawei v2 events (MQTT)**. Selectati un broker MQTT configurat pentru Mosquitto Home Assistant (`192.168.10.50:1883` este adresa de retea HA cunoscuta; verificati port/credentiale MQTT proprii), ori creati configuratia brokerului. Nu salvati parole/token-uri in GitHub.
+3. Deschideti nodul **HA Huawei v2 events (MQTT)**. Selectati un broker MQTT configurat pentru Mosquitto Home Assistant (`<IP_HA>:1883` = adresa locala a Home Assistant; verificati port/credentiale MQTT proprii), ori creati configuratia brokerului. Nu salvati parole/token-uri in GitHub.
 4. Conectati iesirea nodului **Huawei v2 alert -> internal Telegram** la intrarea **Telegram commands + replies** a controlerului existent, cel care accepta mesajele interne `__alert`. NU conectati direct la `Telegram getUpdates`, `Telegram send request` sau DVCC writer.
 5. Deploy **Modified Nodes**. Confirmati ca exista un singur poller `getUpdates` activ si ca botul are `/alerts on`.
 6. Test non-perturbator: publicati o singura data un eveniment JSON de test pe topic `home/energy/huawei/v2/events` (cu timestamp Unix curent; `source=huawei_v2_ha`, `event=data_fault`), fara a schimba bateria. Verificati mesajul Telegram si jurnalul nodului; apoi testati triggerul real cand apare.

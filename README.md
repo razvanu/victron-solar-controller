@@ -24,8 +24,8 @@ The project was developed around this installation. These devices are **referenc
 
 - Cerbo GX MK2, Venus OS v3.80 Large;
 - Node-RED 4.1.11 with `node-red-contrib-victron`;
-- MultiPlus-II 48/6k5 single-phase on L2;
-- Fronius Primo 5 kW on AC-OUT L2;
+- MultiPlus-II 48/6k5 single-phase on L1 (moved from L2 on 2026-11-08);
+- Fronius Primo 5 kW on AC-OUT L1 (follows the MultiPlus; Venus OS PV inverter phase set to L1);
 - Huawei PV inverters on the other phases;
 - Hailei LiFePO4 battery with PACE CAN BMS, reference device instance 512;
 - Shelly Pro 3EM as three-phase grid meter;
@@ -134,7 +134,7 @@ GitHub changes do **not** install themselves on the Cerbo GX.
 
 ## Project scope
 
-This repository does not include the separate SystemCalc L2 patch or unrelated Huawei/Home Assistant projects.
+This repository does not include unrelated Huawei/Home Assistant projects. The former separate SystemCalc L2 patch is obsolete since the MultiPlus moved to L1 (2026-11-08) and must not be reapplied.
 
 The project is not affiliated with or endorsed by Victron Energy, Home Assistant, Solcast, Fronius, Huawei, Shelly, Hailei or PACE. Product and project names belong to their respective owners.
 

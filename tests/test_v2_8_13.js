@@ -356,5 +356,33 @@ function expectedPvCap(sim, pv, cons, V) {
   } finally { cfgNode.func = original; }
 }
 
+// ======================= (e) /why and /limits =======================
+function telegram(sim, cmd) {
+  const cfg = sim.get('solar_cfg'); cfg.telegramEnabled = true; cfg.telegramChatId = '1';
+  const ret = sim.run(ID.telegram, { telegram_chat_id: '1', telegram_command: cmd, telegram_args: [] });
+  return JSON.stringify(ret);
+}
+{
+  const sim = boot();
+  let r = tick(sim, { soc: 40, I: 47, g3: -2000 }, HUAWEI_IDLE);
+  eq(r.s.capSource, 'RESIDUAL_NET_SURPLUS', 'binding ceiling while ratcheting is the residual NET surplus');
+  check(r.s.surplusAvailableW >= 2000, 'surplus available = export + Hailei charging power');
+  for (const cmd of ['/why', '/limits']) {
+    const t = telegram(sim, cmd);
+    check(/Mod ANTI-TRANSFER: NORMAL/.test(t), `${cmd} shows anti-transfer mode`);
+    check(/Surplus-first: ACTIV/.test(t), `${cmd} shows surplus-first`);
+    check(/Sursa plafonului: RESIDUAL_NET_SURPLUS/.test(t), `${cmd} shows ceiling source`);
+    check(/Surplus disponibil \d+ W/.test(t), `${cmd} shows available surplus`);
+  }
+  const sim2 = boot();
+  r = tick(sim2, SUN_L1, HUAWEI_GONE);
+  eq(r.s.capSource, 'DEGRADED_VICTRON_PV', 'binding ceiling in degraded mode');
+  const t = telegram(sim2, '/why');
+  check(/DEGRADAT \(numai PV Victron\)/.test(t) && /Plafon PV Victron \d+ A/.test(t), '/why explains degraded cap');
+  const sim3 = boot();
+  r = tick(sim3, { soc: 40, I: 5, g3: -2000 }, { power: -1500, soc: 60 });
+  eq(r.s.capSource, 'ANTI_TRANSFER_BLOCK', 'binding ceiling when Huawei discharges');
+}
+
 module.exports.tick = tick; module.exports.live = live; module.exports.guard = guard;
 if (require.main === module) console.log(`PASS: ${passed} v2.8.13 checks`);

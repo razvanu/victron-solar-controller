@@ -304,5 +304,36 @@ function expectedPvCap(sim, pv, cons, V) {
   check(Array.isArray(sent) && sent[0] !== null, '__alert_safety is not dropped when /alerts is OFF');
 }
 
+// ======================= (c) CONFIGURABLE PHASES =======================
+{
+  const sim = boot();
+  const cfg = sim.get('solar_cfg');
+  eq(cfg.victronPhase, 'L1', 'default Victron phase L1 (MultiPlus + Fronius moved 2026-11-08)');
+  eq(cfg.huaweiPhase, 'L3', 'default Huawei hybrid phase L3');
+  const configText = byId(ID.config).func;
+  check(!/Hailei\/Victron L2/.test(configText), 'no hard-coded "Victron L2" comment left');
+  // Degraded cap follows the configured Victron phase.
+  cfg.victronPhase = 'L2';
+  let r = tick(sim, { soc: 40, I: 40, g3: -2000, pvOut: { l1: 3000, l2: 1100 }, consOut: { l1: 500, l2: 100 } }, HUAWEI_GONE);
+  eq(r.s.antiTransfer.degradedCapA, expectedPvCap(sim, 1100, 100, 53), 'degraded cap uses PV/consumption of victronPhase=L2');
+  eq(r.s.antiTransfer.victronPhase, 'L2', 'status reports Victron phase');
+  cfg.victronPhase = 'L4';
+  r = tick(sim, { soc: 40, I: 40, g3: -2000 }, HUAWEI_GONE);
+  eq(r.s.antiTransfer.reason, 'DEGRADED_PHASE_CONFIG_INVALID', 'invalid phase config is explicit');
+  eq(r.out, 0, 'invalid phase config -> 0 A in degraded mode');
+  // All three PV/consumption-on-output paths are read.
+  for (const ph of ['L1', 'L2', 'L3'])
+    for (const p of ['PvOnOutput', 'ConsumptionOnOutput'])
+      eq(nodes.filter(n => n.path === `/Ac/${p}/${ph}/Power`).length, 1, `input ${p} ${ph}`);
+  // /phases labels follow the configuration.
+  const sim2 = boot();
+  sim2.get('solar_cfg').telegramEnabled = true;
+  sim2.get('solar_cfg').telegramChatId = '1';
+  tick(sim2, SUN_L1, HUAWEI_IDLE);
+  const ret = sim2.run(ID.telegram, { telegram_chat_id: '1', telegram_command: '/phases', telegram_args: [] });
+  const text = JSON.stringify(ret);
+  check(/L1 \(Victron\)/.test(text) && /L3 \(Huawei\)/.test(text), '/phases shows Victron L1 and Huawei L3');
+}
+
 module.exports.tick = tick; module.exports.live = live; module.exports.guard = guard;
 if (require.main === module) console.log(`PASS: ${passed} v2.8.13 checks`);

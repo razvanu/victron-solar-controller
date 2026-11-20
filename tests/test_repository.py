@@ -87,5 +87,42 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(BASE_INSTALL_SHA256, sha256(ROOT / "service" / "install.sh"))
 
 
+class V2813FlowTests(unittest.TestCase):
+    """Static checks for the v2.8.13 import file (controller tab only)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.path = ROOT / "flows" / "Victron_Solar_Forecast_Charge_Controller_v2_8_13.json"
+        cls.nodes = json.loads(cls.path.read_text(encoding="utf-8"))
+        cls.config = next(n for n in cls.nodes if n.get("id") == "v212_00000004")["func"]
+
+    def test_tab_only_export_with_stable_ids(self):
+        tabs = [n for n in self.nodes if n.get("type") == "tab"]
+        self.assertEqual(["v212_00000000"], [t["id"] for t in tabs])
+        self.assertTrue(all(n.get("z") == "v212_00000000" for n in self.nodes if n.get("type") != "tab"))
+
+    def test_dry_run_and_no_active_restart_by_default(self):
+        self.assertIn("enableOutputDefault: false,", self.config)
+        self.assertIn("activeAfterRestart: false,", self.config)
+
+    def test_exactly_one_dvcc_writer_and_no_ess_writes(self):
+        outputs = [n for n in self.nodes if n.get("type", "").startswith("victron-output")]
+        self.assertEqual(1, len(outputs))
+        self.assertEqual("/Settings/SystemSetup/MaxChargeCurrent", outputs[0].get("path"))
+
+    def test_installation_values_are_placeholders(self):
+        for placeholder in ("HOME_ASSISTANT_IP", "PASTE_LONG_LIVED_ACCESS_TOKEN",
+                            "PASTE_TELEGRAM_BOT_TOKEN", "PASTE_TELEGRAM_CHAT_ID"):
+            self.assertIn(placeholder, self.config)
+        for name in ("SOLAR_HA_TOKEN", "SOLAR_TELEGRAM_TOKEN", "SOLAR_TELEGRAM_CHAT_ID", "SOLAR_HA_URL"):
+            self.assertIn(name, self.config)
+
+    def test_new_safety_settings_present(self):
+        for setting in ("huaweiDataMaxAgeMs: 120000,", "huaweiDegradedGraceMs: 300000,",
+                        "surplusFirstEnabled: true,", 'victronPhase: "L1",', 'huaweiPhase: "L3",',
+                        "socTopTaperTo95A: 20,", "rawCellStopV: 3.52,"):
+            self.assertIn(setting, self.config)
+
+
 if __name__ == "__main__":
     unittest.main()

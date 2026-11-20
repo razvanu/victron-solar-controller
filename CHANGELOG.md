@@ -2,6 +2,18 @@
 
 Toate modificarile notabile ale proiectului sunt documentate aici.
 
+## v2.8.13 — 2026-11-20 (branch fix/winter-surplus-degraded)
+
+- Baseline v2.8.12 exact ca pe Cerbo (`flows/..._v2_8_12.json`, valori locale inlocuite cu placeholderi).
+- Date Huawei valide din `last_reported`/`last_updated` (≤ 120 s, configurabil), fara atributele `huawei_read_*`.
+- Mod degradat ANTI-TRANSFER: 5 min gratie, apoi plafon numai din PV Victron (AC-OUT); alerta Telegram la intrare/iesire.
+- Surplus-first: cat timp exista export si nu e import, plafon 100 A sub limitele BMS/celule/taper; plafon rezidual fara export permanent.
+- Faze configurabile `victronPhase` / `huaweiPhase` (implicit L1 / L3).
+- `activeAfterRestart` optional (implicit false = DRY RUN).
+- `/why` si `/limits`: mod anti-transfer, sursa plafonului, surplus disponibil.
+- Teste: `tests/test_v2_8_13.js` (cod real din flow, simulat); `test_bridge.py` sare numai fara `fcntl` (Windows).
+- Ghid: `docs/V2_8_13_DEPLOY_RO.md`.
+
 ## Unreleased — public-release preparation
 
 - Added public Home Assistant + Solcast setup documentation with exact v2.8.5 entity mappings, units, P10/P50/P90 semantics, freshness limits and REST authentication.

@@ -335,5 +335,26 @@ function expectedPvCap(sim, pv, cons, V) {
   check(/L1 \(Victron\)/.test(text) && /L3 \(Huawei\)/.test(text), '/phases shows Victron L1 and Huawei L3');
 }
 
+// ======================= (d) START AFTER RESTART =======================
+{
+  // Default: DRY RUN after every restart/deploy.
+  const sim = boot();
+  eq(sim.get('controller_enabled'), false, 'default start is DRY RUN');
+  check(/activeAfterRestart: false,/.test(byId(ID.config).func), 'activeAfterRestart defaults to false');
+
+  // Opt-in: active after restart, and missing Huawei data right after boot does not lock 0 A.
+  const cfgNode = byId(ID.config);
+  const original = cfgNode.func;
+  try {
+    cfgNode.func = original.replace('activeAfterRestart: false,', 'activeAfterRestart: true,');
+    const sim2 = boot();
+    eq(sim2.get('controller_enabled'), true, 'activeAfterRestart=true starts ACTIVE');
+    eq(sim2.get('controller_events')[0].kind, 'RESTART_ACTIVE', 'restart-active event queued for Telegram');
+    const r = tick(sim2, SUN_L1, HUAWEI_GONE);
+    eq(r.s.enabled, true, 'controller reports enabled');
+    check(r.out > 0, `restart without Huawei data -> degraded ceiling ${r.out} A, not 0 A`);
+  } finally { cfgNode.func = original; }
+}
+
 module.exports.tick = tick; module.exports.live = live; module.exports.guard = guard;
 if (require.main === module) console.log(`PASS: ${passed} v2.8.13 checks`);

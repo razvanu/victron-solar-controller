@@ -209,5 +209,100 @@ const HUAWEI_IDLE = { power: 0, soc: 43 };
   check(r.out < 40, 'Grid Guard lowers the ceiling');
 }
 
+// ======================= (b) ANTI-TRANSFER DEGRADED MODE =======================
+const SUN_L1 = { soc: 40, V: 53, I: 40, g1: -500, g3: -1500, pvOut: { l1: 3000 }, consOut: { l1: 500 } };
+const HUAWEI_GONE = { powerState: 'unavailable', soc: 43 };
+function expectedPvCap(sim, pv, cons, V) {
+  const cfg = sim.get('solar_cfg');
+  return Math.max(0, Math.floor(Math.max(0, pv - cons - cfg.degradedVictronPvMarginW) * cfg.chargeEfficiency / V));
+}
+{
+  // Sun + Huawei invalid right after start (no previous valid decision): straight to Victron-PV-only cap, never 0 A.
+  const sim = boot();
+  const r = tick(sim, SUN_L1, HUAWEI_GONE);
+  eq(r.s.antiTransfer.degradedState, 'DEGRADED', 'no valid Huawei history -> DEGRADED immediately');
+  eq(r.s.antiTransfer.reason, 'DEGRADED_VICTRON_PV_ONLY', 'reason');
+  eq(r.s.antiTransfer.blocked, false, 'degraded mode does not block');
+  const cap = expectedPvCap(sim, 3000, 500, 53);
+  eq(r.s.antiTransfer.degradedCapA, cap, 'cap = (PV AC-OUT - consumption AC-OUT - margin) * eff / V');
+  check(cap > 0 && r.out === cap, `ceiling limited to Victron PV only (${r.out} A)`);
+}
+{
+  // Huawei valid -> invalid: 5 min grace keeps the last valid decision, then degraded, then automatic recovery.
+  const sim = boot();
+  let r = tick(sim, SUN_L1, HUAWEI_IDLE);
+  eq(r.s.antiTransfer.degradedState, 'NORMAL', 'valid Huawei data -> NORMAL');
+  const normalOut = r.out;
+  sim.advance(5000);
+  r = tick(sim, SUN_L1, HUAWEI_GONE);
+  eq(r.s.antiTransfer.degradedState, 'GRACE', 'invalid -> GRACE');
+  eq(r.s.antiTransfer.blocked, false, 'grace keeps last decision (not blocked)');
+  check(r.out >= normalOut, 'grace does not cut the ceiling to the PV-only cap');
+  sim.advance(299000);
+  r = tick(sim, SUN_L1, HUAWEI_GONE);
+  eq(r.s.antiTransfer.degradedState, 'GRACE', 'still GRACE at 4 min 59 s');
+  sim.advance(2000);
+  r = tick(sim, SUN_L1, HUAWEI_GONE);
+  eq(r.s.antiTransfer.degradedState, 'DEGRADED', 'DEGRADED after 5 min');
+  eq(r.out, expectedPvCap(sim, 3000, 500, 53), 'PV-only cap applied after grace');
+  sim.advance(5000);
+  r = tick(sim, SUN_L1, HUAWEI_IDLE);
+  eq(r.s.antiTransfer.degradedState, 'NORMAL', 'automatic recovery when Huawei data is valid again');
+}
+{
+  // Grace after a blocking decision (Huawei was discharging): stays blocked during grace, then PV-only cap.
+  const sim = boot();
+  let r = tick(sim, SUN_L1, { power: -1500, soc: 60 });
+  eq(r.out, 0, 'Huawei discharging -> 0 A');
+  sim.advance(5000);
+  r = tick(sim, SUN_L1, HUAWEI_GONE);
+  eq(r.s.antiTransfer.degradedState, 'GRACE', 'GRACE after blocking decision');
+  eq(r.out, 0, 'grace keeps the block');
+  sim.advance(301000);
+  r = tick(sim, SUN_L1, HUAWEI_GONE);
+  eq(r.s.antiTransfer.degradedState, 'DEGRADED', 'then DEGRADED');
+  eq(r.out, expectedPvCap(sim, 3000, 500, 53), 'PV-only energy cannot come from the Huawei battery');
+}
+{
+  // Degraded + Victron PV telemetry missing: fail safe at 0 A with an explicit reason.
+  const sim = boot();
+  const r = tick(sim, { soc: 40, I: 40, g3: -2000 }, HUAWEI_GONE);
+  eq(r.s.antiTransfer.reason, 'DEGRADED_VICTRON_PV_MISSING', 'missing PV-on-output telemetry');
+  eq(r.out, 0, 'no PV telemetry -> 0 A');
+  // Night: Fronius 0 W -> nothing to charge from in degraded mode.
+  const sim2 = boot();
+  eq(tick(sim2, { soc: 40, I: 0, g1: 300, pvOut: { l1: 0 }, consOut: { l1: 400 } }, HUAWEI_GONE).out, 0, 'night in degraded mode -> 0 A');
+}
+{
+  // Victron data missing -> 0 A (unchanged LIVE_MISSING path).
+  const sim = boot();
+  parse(sim, HUAWEI_IDLE);
+  live(sim, { soc: 40, I: 40, g3: -2000 });
+  sim.store.set('battery_voltage', null);
+  const ret = sim.run(ID.controller, {});
+  eq(ret[0].payload, 0, 'Victron telemetry missing -> 0 A');
+  eq(sim.get('controller_status').controllerFault, 'LIVE_MISSING', 'LIVE_MISSING fault');
+}
+{
+  // Telegram: DEGRADED enter/exit alerts are sent even with /alerts OFF.
+  const sim = boot();
+  sim.get('solar_cfg').telegramEnabled = true;
+  sim.store.set('alerts_enabled', false);
+  const alerts = () => { const r = sim.run(ID.events, {}); return (r && r[0] || []).filter(m => m.telegram_command === '__alert_safety'); };
+  tick(sim, SUN_L1, HUAWEI_IDLE);
+  eq(alerts().length, 0, 'no alert in NORMAL');
+  sim.advance(5000); tick(sim, SUN_L1, HUAWEI_GONE); eq(alerts().length, 0, 'no alert during GRACE');
+  sim.advance(301000); tick(sim, SUN_L1, HUAWEI_GONE);
+  const a = alerts(); eq(a.length, 1, 'alert on entering DEGRADED');
+  check(/ANTI-TRANSFER DEGRADAT/.test(a[0].telegram_event_text), 'degraded alert text');
+  sim.advance(5000); tick(sim, SUN_L1, HUAWEI_IDLE);
+  const b = alerts(); eq(b.length, 1, 'alert on leaving DEGRADED');
+  check(/ANTI-TRANSFER NORMAL/.test(b[0].telegram_event_text), 'recovery alert text');
+  // The Telegram node delivers __alert_safety regardless of /alerts.
+  sim.store.set('controller_status', sim.get('controller_status'));
+  const sent = sim.run(ID.telegram, { telegram_internal: true, telegram_command: '__alert_safety', telegram_event_text: 'x' });
+  check(Array.isArray(sent) && sent[0] !== null, '__alert_safety is not dropped when /alerts is OFF');
+}
+
 module.exports.tick = tick; module.exports.live = live; module.exports.guard = guard;
 if (require.main === module) console.log(`PASS: ${passed} v2.8.13 checks`);

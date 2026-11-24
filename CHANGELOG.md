@@ -2,13 +2,20 @@
 
 Toate modificarile notabile ale proiectului sunt documentate aici.
 
-## B2 v0.2 — 2026-11-25 (branch feature/b2-l2-setpoint-dryrun, DRY RUN)
+## B2 v0.3 — 2026-11-25 (branch feature/b2-l2-setpoint-dryrun, DRY RUN)
+
+- Faza urmărită e parametru: `B2_EXPORT_PHASE` în CONFIG (`'L2'` implicit = azi; `'L3'` dacă 4KTL se mută pe L3). Flow-ul citește `/Ac/Grid/L2/Power` și `/Ac/Grid/L3/Power`, controllerul o folosește doar pe cea configurată.
+- Fază invalidă (`L1`, greșeală de scriere, lipsă) → țintă 0 (`PHASE_INVALID_…`) și ENABLE refuzat.
+- Fișier nou `flows/B2_Export_Phase_Setpoint_v0_3.json` (același tab id `b2l2_00000000` → import cu Replace peste v0.2); `B2_L2_Grid_Setpoint_v0_2.json` șters.
+- Teste: toată suita rulează pentru L2 și L3 (+ export pe cealaltă fază ignorat, faze invalide) – 118 verificări.
+
+## B2 v0.2 — 2026-11-25
 
 - v0.2: plafonul de încărcare ține cont și de limita DVCC curentă (min(CCL BMS, DVCC, 100 A) × U); DVCC 0 sau necunoscut → 0. Pas nou înainte de LIVE: confirmarea că contorul DEO face suma fazelor.
 
 ## B2 v0.1 — 2026-11-24 (prima versiune)
 
-- Flow separat `flows/B2_L2_Grid_Setpoint_v0_2.json`: `AcPowerSetPoint` (L1) = exportul de pe L2 − 50 W, pentru ESS „Individual phase” (`Hub4Mode = 2`); date locale de pe dbus, fără Home Assistant.
+- Flow separat (`flows/B2_L2_Grid_Setpoint_v0_*.json`, acum v0.3): `AcPowerSetPoint` (L1) = exportul de pe L2 − 50 W, pentru ESS „Individual phase” (`Hub4Mode = 2`); date locale de pe dbus, fără Home Assistant.
 - Limite: max 3000 W și min(CCL BMS, DVCC curent, 100 A) × U (DVCC 0 sau necunoscut → 0; −1 = fără limită software); 0 la date L2 > 10 s, BMS deconectat, CCL 0, SOC ≥ 98 %; în LIVE și la `Hub4Mode ≠ 2`.
 - Uzură flash: scriere la schimbare ≥ 100 W, cel mult o dată la 30 s (scădere la 0 / ≥ 500 W: min. 5 s). Simulare 15–24.11: ~20–60 scrieri/zi senină, ~100–160/zi cu nori.
 - DRY RUN implicit (nepersistent): nu scrie nimic, numără scrierile pe care le-ar fi făcut; ENABLE manual, refuzat fără `Hub4Mode = 2`; din LIVE în DRY RUN → 0.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds flows/B2_L2_Grid_Setpoint_v0_1.json (separate Node-RED tab, DRY RUN by default).
+"""Builds flows/B2_L2_Grid_Setpoint_v0_2.json (separate Node-RED tab, DRY RUN by default).
 
 B2: with ESS 'Multiphase regulation = Individual phase' (Hub4Mode 2) the MultiPlus regulates only L1.
 To keep charging Hailei from the 4KTL inverter that sits on L2, the L1 grid setpoint (/Settings/CGwacs/AcPowerSetPoint)
@@ -9,14 +9,14 @@ Everything runs locally on the Cerbo (grid meter via dbus), no Home Assistant de
 import json, os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(ROOT, "flows", "B2_L2_Grid_Setpoint_v0_1.json")
+OUT = os.path.join(ROOT, "flows", "B2_L2_Grid_Setpoint_v0_2.json")
 TAB = "b2l2_00000000"
 N = []
 def nid(n): return "b2l2_%08x" % n
 
-CONFIG = r"""// B2 v0.1 CONFIG – reviewed constants. DRY RUN is the default after every deploy/restart.
+CONFIG = r"""// B2 v0.2 CONFIG – reviewed constants. DRY RUN is the default after every deploy/restart.
 flow.set('b2_cfg', {
-  version: 'B2 v0.1',
+  version: 'B2 v0.2',
   MAX_W: 3000,                 // hard cap for the L1 import setpoint (worst case if Node-RED hangs)
   OFFSET_W: 50,                // keep a little export on L2 (never chase the last watts)
   STALE_MS: 10000,             // L2 power older than this -> target 0
@@ -30,10 +30,11 @@ flow.set('b2_cfg', {
   VBAT_MIN: 40, VBAT_MAX: 65,
   CHARGER_MAX_A: 100,          // MultiPlus-II 48/6k5/100 charger
   TICK_MS: 5000,
+  DVCC_STALE_MS: 600000,      // DVCC is a setting: dbus sends it on change; refreshed by the startup/inject re-read
   RESET_NONZERO_ON_START: false // DRY RUN PR: only log. Set true when going LIVE (B2 then owns the setpoint).
 });
 if (flow.get('b2_enabled') === undefined) flow.set('b2_enabled', false);
-node.status({fill: 'grey', shape: 'ring', text: 'B2 v0.1 config loaded (DRY RUN)'});
+node.status({fill: 'grey', shape: 'ring', text: 'B2 v0.2 config loaded (DRY RUN)'});
 return null;"""
 
 def store(key, lo, hi):
@@ -43,7 +44,7 @@ def store(key, lo, hi):
             "flow.set(\"%s\",valid?v:null);flow.set(\"%s_ts\",valid?Date.now():0);\n"
             "return null;" % (lo, hi, key, key))
 
-CONTROLLER = r"""// B2 v0.1 – L1 grid setpoint = export on L2. Runs every 5 s. Output 1 -> AcPowerSetPoint (LIVE only).
+CONTROLLER = r"""// B2 v0.2 – L1 grid setpoint = export on L2. Runs every 5 s. Output 1 -> AcPowerSetPoint (LIVE only).
 const C = flow.get('b2_cfg');
 if (!C) { node.status({fill: 'red', shape: 'dot', text: 'B2: no config'}); return null; }
 const now = Date.now();
@@ -69,9 +70,14 @@ if (Number.isFinite(soc) && soc >= C.SOC_FULL) reasons.push('SOC_FULL');
 const v = g('b2_bat_v');
 if (!(Number.isFinite(v) && v >= C.VBAT_MIN && v <= C.VBAT_MAX)) reasons.push('VBAT_INVALID');
 
-let capW = 0, target = 0;
+// DVCC limit currently applied (set by the v2.8.13 controller or Victron): -1 = no software limit, 0 = no charging.
+const dvcc = g('b2_dvcc');
+if (!Number.isFinite(dvcc) || !fresh('b2_dvcc', C.DVCC_STALE_MS)) reasons.push('DVCC_UNKNOWN');
+else if (dvcc === 0) reasons.push('DVCC_0');
+let capW = 0, capA = 0, target = 0;
 if (!reasons.length) {
-  capW = Math.min(C.MAX_W, Math.min(ccl, C.CHARGER_MAX_A) * v);
+  capA = Math.min(ccl, C.CHARGER_MAX_A, dvcc > 0 ? dvcc : Infinity);   // min(BMS CCL, DVCC, charger)
+  capW = Math.min(C.MAX_W, capA * v);
   target = Math.max(0, Math.min(capW, -l2 - C.OFFSET_W));
 }
 let cur = g('b2_cur') || 0;
@@ -92,7 +98,7 @@ st.ticks++;
 st.maxTarget = Math.max(st.maxTarget, target);
 if (Number.isFinite(l2)) st.absorbedWh += Math.min(applied, Math.max(0, -l2)) * C.TICK_MS / 3600000;
 flow.set('b2_stats', st);
-const status = {mode: live ? 'LIVE' : 'DRY_RUN', hub4mode: mode, modeOk, l2: l2, target, want, applied, capW, reasons, write,
+const status = {mode: live ? 'LIVE' : 'DRY_RUN', hub4mode: mode, modeOk, l2: l2, dvcc, capA, target, want, applied, capW, reasons, write,
                 writesToday: live ? st.sent : st.would, ts: now};
 flow.set('b2_status', status);
 node.status({fill: live ? 'green' : 'grey', shape: live ? 'dot' : 'ring',
@@ -157,7 +163,7 @@ def vin(i, typ, service, sname, path, pname, ptype, name, x, y, store_id):
               "serviceObj": {"service": service, "name": sname}, "pathObj": {"path": path, "type": ptype, "name": pname},
               "initial": "", "name": name, "onlyChanges": False, "roundValues": "no", "x": x, "y": y, "wires": [[nid(store_id)]]})
 
-N.append({"id": TAB, "type": "tab", "label": "B2 v0.1 L2 -> L1 grid setpoint - DRY RUN", "disabled": False,
+N.append({"id": TAB, "type": "tab", "label": "B2 v0.2 L2 -> L1 grid setpoint - DRY RUN", "disabled": False,
           "info": "B2: setpoint L1 = export L2 (4KTL). Ruleaza doar cu ESS Individual phase (Hub4Mode 2). DRY RUN implicit; nu scrie nimic pana la ENABLE manual. Vezi docs/B2_L2_SETPOINT_RO.md."})
 inj(1, "B2 CONFIG (startup)", 140, 40, [[nid(2)]], once=True, delay=1)
 fn(2, "B2 CONFIG", CONFIG, 340, 40, [])
@@ -166,6 +172,7 @@ INPUTS = [
     (10, "victron-input-system", "com.victronenergy.system/0", "Venus system", "/Ac/Grid/L2/Power", "Grid L2 Power (W)", "float", "Grid L2 (Shelly B)", "b2_grid_l2", -30000, 30000),
     (12, "victron-input-custom", "com.victronenergy.settings", "com.victronenergy.settings", "/Settings/CGwacs/Hub4Mode", "ess_mode", "float", "ESS Hub4Mode", "b2_hub4mode", 1, 3),
     (14, "victron-input-custom", "com.victronenergy.settings", "com.victronenergy.settings", "/Settings/CGwacs/AcPowerSetPoint", "ess_grid_setpoint", "float", "ESS AcPowerSetPoint (read)", "b2_ess_setpoint", -100000, 100000),
+    (24, "victron-input-custom", "com.victronenergy.settings", "com.victronenergy.settings", "/Settings/SystemSetup/MaxChargeCurrent", "dvcc_max_charge_current", "float", "DVCC MaxChargeCurrent (read)", "b2_dvcc", -1, 1000),
     (16, "victron-input-custom", "com.victronenergy.battery/512", "VICTRON_CAN / CAN-bus BMS (512)", "/Info/MaxChargeCurrent", "/Info/MaxChargeCurrent", "number", "BMS CCL", "b2_bms_ccl", 0, 1000),
     (18, "victron-input-custom", "com.victronenergy.battery/512", "VICTRON_CAN / CAN-bus BMS (512)", "/Connected", "/Connected", "number", "BMS connected", "b2_bms_connected", 0, 1),
     (20, "victron-input-system", "com.victronenergy.system/0", "Venus system", "/Dc/Battery/Soc", "SOC baterie (%)", "float", "SOC Hailei (system)", "b2_soc", 0, 100),

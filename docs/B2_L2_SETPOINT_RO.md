@@ -1,6 +1,6 @@
-# B2 v0.1 – setpoint L1 = exportul de pe L2 (DRY RUN)
+# B2 v0.2 – setpoint L1 = exportul de pe L2 (DRY RUN)
 
-Flow separat: `flows/B2_L2_Grid_Setpoint_v0_1.json` (tab „B2 v0.1 L2 -> L1 grid setpoint - DRY RUN”). Generat din `tools/build_b2_flow.py`; testat de `tests/test_b2_l2_setpoint.js` (rulează codul real al nodurilor, simulat).
+Flow separat: `flows/B2_L2_Grid_Setpoint_v0_2.json` (tab „B2 v0.2 L2 -> L1 grid setpoint - DRY RUN”). Generat din `tools/build_b2_flow.py`; testat de `tests/test_b2_l2_setpoint.js` (rulează codul real al nodurilor, simulat).
 
 ## De ce
 
@@ -13,10 +13,10 @@ Flow separat: `flows/B2_L2_Grid_Setpoint_v0_1.json` (tab „B2 v0.1 L2 -> L1 gri
 
 | Element | Valoare |
 |---|---|
-| Intrări | `/Ac/Grid/L2/Power`, `/Settings/CGwacs/Hub4Mode`, `/Settings/CGwacs/AcPowerSetPoint` (citire), BMS 512 `/Info/MaxChargeCurrent` + `/Connected`, system `/Dc/Battery/Soc` + `/Dc/Battery/Voltage` |
+| Intrări | `/Ac/Grid/L2/Power`, `/Settings/CGwacs/Hub4Mode`, `/Settings/SystemSetup/MaxChargeCurrent` (DVCC, citire), `/Settings/CGwacs/AcPowerSetPoint` (citire), BMS 512 `/Info/MaxChargeCurrent` + `/Connected`, system `/Dc/Battery/Soc` + `/Dc/Battery/Voltage` |
 | Ieșire (singura) | `/Settings/CGwacs/AcPowerSetPoint` – **doar în LIVE** |
-| Țintă | `clamp(−P_L2 − 50 W, 0, min(3000 W, min(CCL, 100 A) × U_bat))` |
-| Țintă 0 dacă | date L2 mai vechi de 10 s, `Hub4Mode ≠ 2` (doar în LIVE), BMS deconectat, CCL 0, SOC ≥ 98 %, tensiune invalidă |
+| Țintă | `clamp(−P_L2 − 50 W, 0, min(3000 W, min(CCL BMS, DVCC curent, 100 A) × U_bat))` – DVCC = limita setată acum de controller (−1 = fără limită software) |
+| Țintă 0 dacă | DVCC = 0 sau necunoscut (> 10 min), date L2 mai vechi de 10 s, `Hub4Mode ≠ 2` (doar în LIVE), BMS deconectat, CCL 0, SOC ≥ 98 %, tensiune invalidă |
 | Rampă | +250 W / 5 s (500 W / 10 s) la creștere; scădere imediată |
 | Uzură flash | scrie doar la schimbare ≥ **100 W** și cel mult o dată la **30 s**; excepții (min. 5 s): scădere la 0 sau cu ≥ 500 W |
 | DRY RUN | implicit după fiecare deploy/restart; calculează tot, **nu scrie nimic**, numără „ar fi scris” pe zi |
@@ -24,7 +24,7 @@ Flow separat: `flows/B2_L2_Grid_Setpoint_v0_1.json` (tab „B2 v0.1 L2 -> L1 gri
 | DRY RUN din LIVE | scrie o dată 0 |
 | Start | dacă `AcPowerSetPoint ≠ 0`: în v0.1 doar avertizare (`RESET_NONZERO_ON_START=false`); pentru LIVE se pune `true` |
 
-Nu scrie DVCC (`MaxChargeCurrent`) și nu schimbă `Hub4Mode`. DVCC/BMS rămân limitele bateriei; controllerul v2.8.13 nu e atins.
+Nu scrie DVCC (`MaxChargeCurrent`, doar îl citește pentru plafon) și nu schimbă `Hub4Mode`. DVCC/BMS rămân limitele bateriei; controllerul v2.8.13 nu e atins.
 
 ## Scrieri estimate (simulare pe istoricul L2, 15–24.11, 07:00–18:00)
 
@@ -39,7 +39,7 @@ Nu scrie DVCC (`MaxChargeCurrent`) și nu schimbă `Hub4Mode`. DVCC/BMS rămân 
 
 ## Import (DRY RUN) – îl face utilizatorul
 
-1. Node-RED pe Cerbo → Import → `flows/B2_L2_Grid_Setpoint_v0_1.json` → **new tab** (nu Replace) → Deploy.
+1. Node-RED pe Cerbo → Import → `flows/B2_L2_Grid_Setpoint_v0_2.json` → **new tab** (nu Replace) → Deploy.
 2. Tab-ul nou apare cu status gri „DRY_RUN … ar fi scris azi: N”. Nu se apasă ENABLE.
 3. Verificare (doar citire): butonul „B2 show counters” (debug), sau `curl http://127.0.0.1:1880/context/flow/b2l2_00000000` pe Cerbo: `b2_status` (target, reasons), `b2_stats` (would, maxTarget, absorbedWh).
 4. Cu `Hub4Mode = 1` (azi) DRY RUN calculează **ca și cum** modul ar fi 2 (statusul arată „(Hub4Mode 1)”), deci contoarele „ar fi scris” sunt reale pentru decizia LIVE. În LIVE, `Hub4Mode ≠ 2` blochează orice scriere (ENABLE refuzat; schimbarea modului în timpul LIVE → setpoint 0).
@@ -49,10 +49,11 @@ Rollback DRY RUN: se șterge tab-ul B2 și Deploy. Nu a scris nimic.
 ## Înainte de LIVE (aprobare separată)
 
 1. Testul de faze (L1 = MultiPlus, L2 = 4 kW) confirmat.
-2. `Hub4Mode = 2` setat de utilizator din GX (Settings → ESS → Multiphase regulation → Individual phase); verificat `GetValue`.
-3. `RESET_NONZERO_ON_START = true` în CONFIG.
-4. Gardă secundară în Home Assistant (poate doar pune setpoint-ul pe 0 + notificare) activă.
-5. Primul test LIVE cu `MAX_W = 200` (confirmă că setpoint-ul se aplică pe L1, nu pe total), apoi 3000.
+2. Confirmat că contorul DEO face suma fazelor (B2 cumpără pe L1 cât vinde pe L2).
+3. `Hub4Mode = 2` setat de utilizator din GX (Settings → ESS → Multiphase regulation → Individual phase); verificat `GetValue`.
+4. `RESET_NONZERO_ON_START = true` în CONFIG.
+5. Gardă secundară în Home Assistant (poate doar pune setpoint-ul pe 0 + notificare) activă.
+6. Primul test LIVE cu `MAX_W = 200` (confirmă că setpoint-ul se aplică pe L1, nu pe total), apoi 3000.
 
 ## Riscuri rămase
 

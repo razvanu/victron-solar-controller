@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 'use strict';
-// B2 v0.1 tests: run the real function bodies from flows/B2_L2_Grid_Setpoint_v0_1.json in a sandbox
+// B2 v0.2 tests: run the real function bodies from flows/B2_L2_Grid_Setpoint_v0_2.json in a sandbox
 // (flow context and clock simulated). No network, no Cerbo, no Home Assistant.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const FILE = path.join(__dirname, '..', 'flows', 'B2_L2_Grid_Setpoint_v0_1.json');
+const FILE = path.join(__dirname, '..', 'flows', 'B2_L2_Grid_Setpoint_v0_2.json');
 const nodes = JSON.parse(fs.readFileSync(FILE, 'utf8'));
 const byName = name => { const n = nodes.find(x => x.type === 'function' && x.name === name); if (!n) throw new Error('missing ' + name); return n; };
 let passed = 0;
@@ -27,12 +27,12 @@ class Sim {
   get(k) { return this.store.get(k); }
   // inputs arrive every second on the Cerbo: re-stamp them on every tick unless frozen (stale tests)
   tick(n = 1) { const out = []; for (let i = 0; i < n; i++) { this.now += 5000;
-    for (const k of ['b2_grid_l2', 'b2_hub4mode', 'b2_bms_ccl', 'b2_bms_connected', 'b2_soc', 'b2_bat_v', 'b2_ess_setpoint'])
+    for (const k of ['b2_grid_l2', 'b2_hub4mode', 'b2_bms_ccl', 'b2_bms_connected', 'b2_soc', 'b2_bat_v', 'b2_ess_setpoint', 'b2_dvcc'])
       if (this.store.has(k + '_ts') && !(this.frozen || []).includes(k)) this.store.set(k + '_ts', this.now);
     const r = this.run('B2 controller (L2 export -> L1 setpoint)'); if (r) out.push(r.payload); } return out; }
-  feed({ l2 = -2000, mode = 2, ccl = 145, conn = 1, soc = 60, v = 53, sp = 0 } = {}) {
+  feed({ l2 = -2000, mode = 2, ccl = 145, conn = 1, soc = 60, v = 53, sp = 0, dvcc = -1 } = {}) {
     this.set('b2_grid_l2', l2); this.set('b2_hub4mode', mode); this.set('b2_bms_ccl', ccl); this.set('b2_bms_connected', conn);
-    this.set('b2_soc', soc); this.set('b2_bat_v', v); this.set('b2_ess_setpoint', sp);
+    this.set('b2_soc', soc); this.set('b2_bat_v', v); this.set('b2_ess_setpoint', sp); this.set('b2_dvcc', dvcc);
   }
 }
 function boot() { const s = new Sim(); s.run('B2 CONFIG'); return s; }
@@ -71,6 +71,18 @@ for (const n of nodes.filter(n => n.type === 'function')) new Function('msg', 'f
 { const s = boot(); s.feed({ l2: -6000, ccl: 40, v: 50 }); s.run('B2 enable / DRY RUN', { payload: true });
   s.tick(30); eq(s.get('b2_status').capW, 2000, 'cap by CCL x U'); check(s.get('b2_cur') <= 2000, 'never above cap');
   const t = boot(); t.feed({ l2: -6000 }); t.run('B2 enable / DRY RUN', { payload: true }); t.tick(40); eq(t.get('b2_cur'), 3000, 'hard cap 3000 W'); }
+
+// 3b. DVCC limit: cap = min(CCL, DVCC, 100 A) x U; DVCC 0 -> 0; DVCC -1 -> no software limit; unknown DVCC -> 0
+{ const s = boot(); s.feed({ l2: -4000, dvcc: 20, v: 53 }); s.run('B2 enable / DRY RUN', { payload: true }); s.tick(30);
+  eq(s.get('b2_status').capA, 20, 'capA = DVCC 20 A'); eq(s.get('b2_status').capW, 1060, 'capW = 20 A x 53 V'); check(s.get('b2_cur') <= 1060, 'never above DVCC cap');
+  const t = boot(); t.feed({ l2: -4000, dvcc: 0 }); t.run('B2 enable / DRY RUN', { payload: true }); t.tick(10);
+  eq(t.get('b2_cur'), 0, 'DVCC 0 -> 0'); check(t.get('b2_status').reasons.includes('DVCC_0'), 'reason DVCC_0');
+  const u = boot(); u.feed({ l2: -4000, dvcc: -1, ccl: 30, v: 50 }); u.run('B2 enable / DRY RUN', { payload: true }); u.tick(30);
+  eq(u.get('b2_status').capW, 1500, 'DVCC -1 -> cap by CCL 30 A x 50 V');
+  const w = boot(); w.feed({ l2: -4000, dvcc: 80, ccl: 145 }); w.run('B2 enable / DRY RUN', { payload: true }); w.tick(40);
+  eq(w.get('b2_status').capW, 3000, 'DVCC 80 A x 53 V capped by MAX_W');
+  const x = boot(); x.feed({ l2: -2000 }); x.run('B2 enable / DRY RUN', { payload: true }); x.tick(20);
+  x.store.delete('b2_dvcc'); const out = x.tick(1); eq(out[0], 0, 'DVCC unknown -> 0'); check(x.get('b2_status').reasons.includes('DVCC_UNKNOWN'), 'reason DVCC_UNKNOWN'); }
 
 // 4. Stale L2 -> 0 quickly (fast path, >= 5 s)
 { const s = boot(); s.feed({ l2: -2000 }); s.run('B2 enable / DRY RUN', { payload: true }); s.tick(20);

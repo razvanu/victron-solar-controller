@@ -2,6 +2,15 @@
 
 Toate modificarile notabile ale proiectului sunt documentate aici.
 
+## B2 v0.1 — 2026-11-24 (branch feature/b2-l2-setpoint-dryrun, DRY RUN)
+
+- Flow separat `flows/B2_L2_Grid_Setpoint_v0_1.json`: `AcPowerSetPoint` (L1) = exportul de pe L2 − 50 W, pentru ESS „Individual phase” (`Hub4Mode = 2`); date locale de pe dbus, fără Home Assistant.
+- Limite: max 3000 W și min(CCL, 100 A) × U; 0 la date L2 > 10 s, BMS deconectat, CCL 0, SOC ≥ 98 %; în LIVE și la `Hub4Mode ≠ 2`.
+- Uzură flash: scriere la schimbare ≥ 100 W, cel mult o dată la 30 s (scădere la 0 / ≥ 500 W: min. 5 s). Simulare 15–24.11: ~20–60 scrieri/zi senină, ~100–160/zi cu nori.
+- DRY RUN implicit (nepersistent): nu scrie nimic, numără scrierile pe care le-ar fi făcut; ENABLE manual, refuzat fără `Hub4Mode = 2`; din LIVE în DRY RUN → 0.
+- Teste: `tests/test_b2_l2_setpoint.js` (42 verificări); `test_flow_syntax.js` include și flow-ul B2.
+- Ghid: `docs/B2_L2_SETPOINT_RO.md`. Generator: `tools/build_b2_flow.py`.
+
 ## v2.8.13 — 2026-11-20 (branch fix/winter-surplus-degraded)
 
 - Baseline v2.8.12 exact ca pe Cerbo (`flows/..._v2_8_12.json`, valori locale inlocuite cu placeholderi).

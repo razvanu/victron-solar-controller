@@ -1,0 +1,609 @@
+[
+  {
+    "id": "b2l2_00000000",
+    "type": "tab",
+    "label": "B2 v0.1 L2 -> L1 grid setpoint - DRY RUN",
+    "disabled": false,
+    "info": "B2: setpoint L1 = export L2 (4KTL). Ruleaza doar cu ESS Individual phase (Hub4Mode 2). DRY RUN implicit; nu scrie nimic pana la ENABLE manual. Vezi docs/B2_L2_SETPOINT_RO.md."
+  },
+  {
+    "id": "b2l2_00000001",
+    "type": "inject",
+    "z": "b2l2_00000000",
+    "name": "B2 CONFIG (startup)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 140,
+    "y": 40,
+    "wires": [
+      [
+        "b2l2_00000002"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_00000002",
+    "type": "function",
+    "z": "b2l2_00000000",
+    "name": "B2 CONFIG",
+    "func": "// B2 v0.1 CONFIG – reviewed constants. DRY RUN is the default after every deploy/restart.\nflow.set('b2_cfg', {\n  version: 'B2 v0.1',\n  MAX_W: 3000,                 // hard cap for the L1 import setpoint (worst case if Node-RED hangs)\n  OFFSET_W: 50,                // keep a little export on L2 (never chase the last watts)\n  STALE_MS: 10000,             // L2 power older than this -> target 0\n  DEADBAND_W: 100,             // write only when the value changes by >= 100 W ...\n  MIN_INTERVAL_MS: 30000,      // ... and at most once per 30 s (AcPowerSetPoint is a persistent setting -> flash)\n  FAST_MIN_MS: 5000,           // going to 0, or dropping >= FAST_DROP_W, may bypass the 30 s limit (min 5 s)\n  FAST_DROP_W: 500,\n  RAMP_UP_W_PER_TICK: 250,     // +250 W per 5 s tick (= 500 W / 10 s); decreases are immediate\n  SOC_FULL: 98,                // Hailei SOC (Venus system) at/above this -> target 0\n  REQUIRED_HUB4MODE: 2,        // 2 = Optimized, phase compensation DISABLED (Individual phase). Never write in mode 1/3.\n  VBAT_MIN: 40, VBAT_MAX: 65,\n  CHARGER_MAX_A: 100,          // MultiPlus-II 48/6k5/100 charger\n  TICK_MS: 5000,\n  RESET_NONZERO_ON_START: false // DRY RUN PR: only log. Set true when going LIVE (B2 then owns the setpoint).\n});\nif (flow.get('b2_enabled') === undefined) flow.set('b2_enabled', false);\nnode.status({fill: 'grey', shape: 'ring', text: 'B2 v0.1 config loaded (DRY RUN)'});\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 340,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "b2l2_0000000a",
+    "type": "victron-input-system",
+    "z": "b2l2_00000000",
+    "outputs": 1,
+    "service": "com.victronenergy.system/0",
+    "path": "/Ac/Grid/L2/Power",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system"
+    },
+    "pathObj": {
+      "path": "/Ac/Grid/L2/Power",
+      "type": "float",
+      "name": "Grid L2 Power (W)"
+    },
+    "initial": "",
+    "name": "Grid L2 (Shelly B)",
+    "onlyChanges": false,
+    "roundValues": "no",
+    "x": 160,
+    "y": 100,
+    "wires": [
+      [
+        "b2l2_0000000b"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_0000000b",
+    "type": "function",
+    "z": "b2l2_00000000",
+    "name": "store b2_grid_l2",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=-30000&&v<=30000;\nflow.set(\"b2_grid_l2\",valid?v:null);flow.set(\"b2_grid_l2_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "b2l2_0000000c",
+    "type": "victron-input-custom",
+    "z": "b2l2_00000000",
+    "outputs": 1,
+    "service": "com.victronenergy.settings",
+    "path": "/Settings/CGwacs/Hub4Mode",
+    "serviceObj": {
+      "service": "com.victronenergy.settings",
+      "name": "com.victronenergy.settings"
+    },
+    "pathObj": {
+      "path": "/Settings/CGwacs/Hub4Mode",
+      "type": "float",
+      "name": "ess_mode"
+    },
+    "initial": "",
+    "name": "ESS Hub4Mode",
+    "onlyChanges": false,
+    "roundValues": "no",
+    "x": 160,
+    "y": 150,
+    "wires": [
+      [
+        "b2l2_0000000d"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_0000000d",
+    "type": "function",
+    "z": "b2l2_00000000",
+    "name": "store b2_hub4mode",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=1&&v<=3;\nflow.set(\"b2_hub4mode\",valid?v:null);flow.set(\"b2_hub4mode_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 150,
+    "wires": []
+  },
+  {
+    "id": "b2l2_0000000e",
+    "type": "victron-input-custom",
+    "z": "b2l2_00000000",
+    "outputs": 1,
+    "service": "com.victronenergy.settings",
+    "path": "/Settings/CGwacs/AcPowerSetPoint",
+    "serviceObj": {
+      "service": "com.victronenergy.settings",
+      "name": "com.victronenergy.settings"
+    },
+    "pathObj": {
+      "path": "/Settings/CGwacs/AcPowerSetPoint",
+      "type": "float",
+      "name": "ess_grid_setpoint"
+    },
+    "initial": "",
+    "name": "ESS AcPowerSetPoint (read)",
+    "onlyChanges": false,
+    "roundValues": "no",
+    "x": 160,
+    "y": 200,
+    "wires": [
+      [
+        "b2l2_0000000f"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_0000000f",
+    "type": "function",
+    "z": "b2l2_00000000",
+    "name": "store b2_ess_setpoint",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=-100000&&v<=100000;\nflow.set(\"b2_ess_setpoint\",valid?v:null);flow.set(\"b2_ess_setpoint_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "b2l2_00000010",
+    "type": "victron-input-custom",
+    "z": "b2l2_00000000",
+    "outputs": 1,
+    "service": "com.victronenergy.battery/512",
+    "path": "/Info/MaxChargeCurrent",
+    "serviceObj": {
+      "service": "com.victronenergy.battery/512",
+      "name": "VICTRON_CAN / CAN-bus BMS (512)"
+    },
+    "pathObj": {
+      "path": "/Info/MaxChargeCurrent",
+      "type": "number",
+      "name": "/Info/MaxChargeCurrent"
+    },
+    "initial": "",
+    "name": "BMS CCL",
+    "onlyChanges": false,
+    "roundValues": "no",
+    "x": 160,
+    "y": 250,
+    "wires": [
+      [
+        "b2l2_00000011"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_00000011",
+    "type": "function",
+    "z": "b2l2_00000000",
+    "name": "store b2_bms_ccl",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=0&&v<=1000;\nflow.set(\"b2_bms_ccl\",valid?v:null);flow.set(\"b2_bms_ccl_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 250,
+    "wires": []
+  },
+  {
+    "id": "b2l2_00000012",
+    "type": "victron-input-custom",
+    "z": "b2l2_00000000",
+    "outputs": 1,
+    "service": "com.victronenergy.battery/512",
+    "path": "/Connected",
+    "serviceObj": {
+      "service": "com.victronenergy.battery/512",
+      "name": "VICTRON_CAN / CAN-bus BMS (512)"
+    },
+    "pathObj": {
+      "path": "/Connected",
+      "type": "number",
+      "name": "/Connected"
+    },
+    "initial": "",
+    "name": "BMS connected",
+    "onlyChanges": false,
+    "roundValues": "no",
+    "x": 160,
+    "y": 300,
+    "wires": [
+      [
+        "b2l2_00000013"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_00000013",
+    "type": "function",
+    "z": "b2l2_00000000",
+    "name": "store b2_bms_connected",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=0&&v<=1;\nflow.set(\"b2_bms_connected\",valid?v:null);flow.set(\"b2_bms_connected_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 300,
+    "wires": []
+  },
+  {
+    "id": "b2l2_00000014",
+    "type": "victron-input-system",
+    "z": "b2l2_00000000",
+    "outputs": 1,
+    "service": "com.victronenergy.system/0",
+    "path": "/Dc/Battery/Soc",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system"
+    },
+    "pathObj": {
+      "path": "/Dc/Battery/Soc",
+      "type": "float",
+      "name": "SOC baterie (%)"
+    },
+    "initial": "",
+    "name": "SOC Hailei (system)",
+    "onlyChanges": false,
+    "roundValues": "no",
+    "x": 160,
+    "y": 350,
+    "wires": [
+      [
+        "b2l2_00000015"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_00000015",
+    "type": "function",
+    "z": "b2l2_00000000",
+    "name": "store b2_soc",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=0&&v<=100;\nflow.set(\"b2_soc\",valid?v:null);flow.set(\"b2_soc_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 350,
+    "wires": []
+  },
+  {
+    "id": "b2l2_00000016",
+    "type": "victron-input-system",
+    "z": "b2l2_00000000",
+    "outputs": 1,
+    "service": "com.victronenergy.system/0",
+    "path": "/Dc/Battery/Voltage",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system"
+    },
+    "pathObj": {
+      "path": "/Dc/Battery/Voltage",
+      "type": "float",
+      "name": "Tensiune baterie (V)"
+    },
+    "initial": "",
+    "name": "U baterie",
+    "onlyChanges": false,
+    "roundValues": "no",
+    "x": 160,
+    "y": 400,
+    "wires": [
+      [
+        "b2l2_00000017"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_00000017",
+    "type": "function",
+    "z": "b2l2_00000000",
+    "name": "store b2_bat_v",
+    "func": "const r=msg.payload;\nconst v=(r===null||r===undefined||typeof r===\"boolean\"||String(r).trim()===\"\")?NaN:Number(r);\nconst valid=Number.isFinite(v)&&v>=0&&v<=100;\nflow.set(\"b2_bat_v\",valid?v:null);flow.set(\"b2_bat_v_ts\",valid?Date.now():0);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 400,
+    "wires": []
+  },
+  {
+    "id": "b2l2_0000001e",
+    "type": "inject",
+    "z": "b2l2_00000000",
+    "name": "B2 tick / 5 sec",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "5",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 10,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 140,
+    "y": 480,
+    "wires": [
+      [
+        "b2l2_0000001f"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_0000001f",
+    "type": "function",
+    "z": "b2l2_00000000",
+    "name": "B2 controller (L2 export -> L1 setpoint)",
+    "func": "// B2 v0.1 – L1 grid setpoint = export on L2. Runs every 5 s. Output 1 -> AcPowerSetPoint (LIVE only).\nconst C = flow.get('b2_cfg');\nif (!C) { node.status({fill: 'red', shape: 'dot', text: 'B2: no config'}); return null; }\nconst now = Date.now();\nconst g = k => flow.get(k);\nconst fresh = (k, ms) => { const ts = g(k + '_ts') || 0; return ts > 0 && now - ts <= ms; };\nconst live = g('b2_enabled') === true;\nconst day = new Date(now + 2 * 3600 * 1000).toISOString().slice(0, 10);   // local date (EET), only for daily counters\nlet st = g('b2_stats');\nif (!st || st.day !== day) { if (st) flow.set('b2_stats_prev', st); st = {day, would: 0, sent: 0, fast: 0, maxTarget: 0, absorbedWh: 0, ticks: 0}; }\n\nconst reasons = [];\nconst l2 = g('b2_grid_l2');\nif (l2 === null || l2 === undefined || !fresh('b2_grid_l2', C.STALE_MS)) reasons.push('L2_STALE');\nconst mode = g('b2_hub4mode');\nconst modeOk = mode === C.REQUIRED_HUB4MODE;\n// LIVE: wrong ESS mode blocks everything. DRY RUN: computed as if Hub4Mode were 2, so the counters show what B2 WOULD do.\nif (!modeOk && live) reasons.push('HUB4MODE_' + mode);\nif (g('b2_bms_connected') !== 1) reasons.push('BMS_DISCONNECTED');\nconst ccl = g('b2_bms_ccl');\nif (!(ccl > 0)) reasons.push('CCL_0');\nconst soc = g('b2_soc');\nif (Number.isFinite(soc) && soc >= C.SOC_FULL) reasons.push('SOC_FULL');\nconst v = g('b2_bat_v');\nif (!(Number.isFinite(v) && v >= C.VBAT_MIN && v <= C.VBAT_MAX)) reasons.push('VBAT_INVALID');\n\nlet capW = 0, target = 0;\nif (!reasons.length) {\n  capW = Math.min(C.MAX_W, Math.min(ccl, C.CHARGER_MAX_A) * v);\n  target = Math.max(0, Math.min(capW, -l2 - C.OFFSET_W));\n}\nlet cur = g('b2_cur') || 0;\ncur = target > cur ? Math.min(target, cur + C.RAMP_UP_W_PER_TICK) : target;   // ramp up, drop immediately\nflow.set('b2_cur', cur);\nconst want = Math.round(cur / 10) * 10;\nconst last = g('b2_last_sent') || 0;\nconst lastTs = g('b2_last_sent_ts') || 0;\nconst fast = (want === 0 && last > 0) || (last - want >= C.FAST_DROP_W);\nconst write = (Math.abs(want - last) >= C.DEADBAND_W && now - lastTs >= C.MIN_INTERVAL_MS) || (fast && now - lastTs >= C.FAST_MIN_MS);\nif (write) {\n  flow.set('b2_last_sent', want); flow.set('b2_last_sent_ts', now);\n  if (live) st.sent++; else st.would++;\n  if (fast) st.fast++;\n}\nconst applied = write ? want : last;\nst.ticks++;\nst.maxTarget = Math.max(st.maxTarget, target);\nif (Number.isFinite(l2)) st.absorbedWh += Math.min(applied, Math.max(0, -l2)) * C.TICK_MS / 3600000;\nflow.set('b2_stats', st);\nconst status = {mode: live ? 'LIVE' : 'DRY_RUN', hub4mode: mode, modeOk, l2: l2, target, want, applied, capW, reasons, write,\n                writesToday: live ? st.sent : st.would, ts: now};\nflow.set('b2_status', status);\nnode.status({fill: live ? 'green' : 'grey', shape: live ? 'dot' : 'ring',\n  text: `${status.mode}${modeOk ? '' : ' (Hub4Mode ' + mode + ')'} L2=${Number.isFinite(l2) ? Math.round(l2) : '?'}W sp=${applied}W ${reasons.join(',') || 'OK'} | ${live ? 'scrieri' : 'ar fi scris'} azi: ${status.writesToday}`});\nif (write && live) return {payload: want, topic: 'b2_setpoint'};\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 480,
+    "wires": [
+      [
+        "b2l2_00000028"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_00000020",
+    "type": "inject",
+    "z": "b2l2_00000000",
+    "name": "B2 ENABLE (LIVE) - doar cu aprobare",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "true",
+    "payloadType": "bool",
+    "x": 170,
+    "y": 540,
+    "wires": [
+      [
+        "b2l2_00000021"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_00000022",
+    "type": "inject",
+    "z": "b2l2_00000000",
+    "name": "B2 DRY RUN / disable",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "false",
+    "payloadType": "bool",
+    "x": 150,
+    "y": 580,
+    "wires": [
+      [
+        "b2l2_00000021"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_00000021",
+    "type": "function",
+    "z": "b2l2_00000000",
+    "name": "B2 enable / DRY RUN",
+    "func": "// ENABLE (payload true) / DRY RUN (payload false). Not persistent: every restart/deploy = DRY RUN.\nconst C = flow.get('b2_cfg') || {REQUIRED_HUB4MODE: 2};\nconst wantLive = msg.payload === true;\nconst wasLive = flow.get('b2_enabled') === true;\nif (wantLive) {\n  const mode = flow.get('b2_hub4mode');\n  if (mode !== C.REQUIRED_HUB4MODE) {\n    flow.set('b2_enabled', false);\n    node.warn('B2: ENABLE refuzat – Hub4Mode=' + mode + ' (trebuie ' + C.REQUIRED_HUB4MODE + ' = Individual phase)');\n    return null;\n  }\n  const sp = flow.get('b2_ess_setpoint');\n  flow.set('b2_enabled', true); flow.set('b2_cur', 0);\n  flow.set('b2_last_sent', Number.isFinite(sp) ? sp : 0); flow.set('b2_last_sent_ts', 0);\n  node.warn('B2: LIVE');\n  return null;\n}\nflow.set('b2_enabled', false);\nflow.set('b2_cur', 0);\nif (wasLive) {   // leave LIVE -> put the setpoint back to 0 once\n  flow.set('b2_last_sent', 0); flow.set('b2_last_sent_ts', Date.now());\n  node.warn('B2: DRY RUN – AcPowerSetPoint -> 0');\n  return {payload: 0, topic: 'b2_setpoint'};\n}\nnode.warn('B2: DRY RUN');\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 560,
+    "wires": [
+      [
+        "b2l2_00000028"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_00000023",
+    "type": "inject",
+    "z": "b2l2_00000000",
+    "name": "B2 startup check (20 s)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 20,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 150,
+    "y": 630,
+    "wires": [
+      [
+        "b2l2_00000024"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_00000024",
+    "type": "function",
+    "z": "b2l2_00000000",
+    "name": "B2 startup check",
+    "func": "// 20 s after start: B2 is DRY RUN; a non-zero AcPowerSetPoint can only be a leftover of a LIVE session.\nconst C = flow.get('b2_cfg') || {};\nflow.set('b2_enabled', false); flow.set('b2_cur', 0);\nconst sp = flow.get('b2_ess_setpoint');\nflow.set('b2_last_sent', Number.isFinite(sp) ? sp : 0); flow.set('b2_last_sent_ts', 0);\nif (Number.isFinite(sp) && sp !== 0) {\n  if (C.RESET_NONZERO_ON_START === true) {\n    node.warn('B2 start: AcPowerSetPoint=' + sp + ' W -> 0');\n    flow.set('b2_last_sent', 0); flow.set('b2_last_sent_ts', Date.now());\n    return {payload: 0, topic: 'b2_setpoint'};\n  }\n  node.warn('B2 start: AcPowerSetPoint=' + sp + ' W (nenul) – DRY RUN: NU resetez (RESET_NONZERO_ON_START=false)');\n}\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 630,
+    "wires": [
+      [
+        "b2l2_00000028"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_00000028",
+    "type": "victron-output-ess",
+    "z": "b2l2_00000000",
+    "outputs": 0,
+    "service": "com.victronenergy.settings",
+    "path": "/Settings/CGwacs/AcPowerSetPoint",
+    "serviceObj": {
+      "service": "com.victronenergy.settings",
+      "name": "Venus settings",
+      "communityTag": "ess"
+    },
+    "pathObj": {
+      "path": "/Settings/CGwacs/AcPowerSetPoint",
+      "type": "float",
+      "name": "ESS control loop setpoint (W)",
+      "mode": "both"
+    },
+    "initial": "",
+    "name": "AcPowerSetPoint – B2 ONLY WRITER",
+    "onlyChanges": false,
+    "conditionalMode": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "debounce": "",
+    "x": 720,
+    "y": 560,
+    "wires": []
+  },
+  {
+    "id": "b2l2_00000032",
+    "type": "inject",
+    "z": "b2l2_00000000",
+    "name": "B2 show counters",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 140,
+    "y": 700,
+    "wires": [
+      [
+        "b2l2_00000033"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_00000033",
+    "type": "function",
+    "z": "b2l2_00000000",
+    "name": "B2 counters",
+    "func": "// Show today's / yesterday's counters (button).\nmsg.payload = {status: flow.get('b2_status'), today: flow.get('b2_stats'), yesterday: flow.get('b2_stats_prev'), cfg: flow.get('b2_cfg')};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 700,
+    "wires": [
+      [
+        "b2l2_00000034"
+      ]
+    ]
+  },
+  {
+    "id": "b2l2_00000034",
+    "type": "debug",
+    "z": "b2l2_00000000",
+    "name": "B2 counters",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 600,
+    "y": 700,
+    "wires": []
+  }
+]

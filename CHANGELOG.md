@@ -8,6 +8,7 @@ Toate modificarile notabile ale proiectului sunt documentate aici.
 - Fază invalidă (`L1`, greșeală de scriere, lipsă) → țintă 0 (`PHASE_INVALID_…`) și ENABLE refuzat.
 - Fișier nou `flows/B2_Export_Phase_Setpoint_v0_3.json` (același tab id `b2l2_00000000` → import cu Replace peste v0.2); `B2_L2_Grid_Setpoint_v0_2.json` șters.
 - Teste: toată suita rulează pentru L2 și L3 (+ export pe cealaltă fază ignorat, faze invalide) – 118 verificări.
+- Identificatorii nodurilor Victron luați din exportul utilizatorului de pe Cerbo (noduri reselectate în editor, victron nodes 1.7.27): `com.victronenergy.system` fără „/0” + `communityTag: system`, câmpurile de condiție goale, numele căilor din editor → nodurile nu mai apar „disconnected” la import. Logica neschimbată; fișierul generat e identic cu exportul (fără nodul `global-config`).
 
 ## B2 v0.2 — 2026-11-25
 

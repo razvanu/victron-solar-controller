@@ -45,28 +45,37 @@
     "libs": [],
     "x": 340,
     "y": 40,
-    "wires": []
+    "wires": [
+      []
+    ]
   },
   {
     "id": "b2l2_0000000a",
     "type": "victron-input-system",
     "z": "b2l2_00000000",
     "outputs": 1,
-    "service": "com.victronenergy.system/0",
+    "service": "com.victronenergy.system",
     "path": "/Ac/Grid/L2/Power",
     "serviceObj": {
-      "service": "com.victronenergy.system/0",
-      "name": "Venus system"
+      "service": "com.victronenergy.system",
+      "name": "Venus system",
+      "communityTag": "system"
     },
     "pathObj": {
       "path": "/Ac/Grid/L2/Power",
       "type": "float",
-      "name": "Grid L2 Power (W)"
+      "name": "Grid L2 (W)"
     },
     "initial": "",
     "name": "Grid L2 (Shelly B)",
     "onlyChanges": false,
     "roundValues": "no",
+    "conditionalMode": false,
+    "condition1HysteresisEnabled": false,
+    "condition1HysteresisThreshold": "",
+    "outputTrue": "",
+    "outputFalse": "",
+    "debounce": "",
     "x": 160,
     "y": 100,
     "wires": [
@@ -89,28 +98,37 @@
     "libs": [],
     "x": 420,
     "y": 100,
-    "wires": []
+    "wires": [
+      []
+    ]
   },
   {
     "id": "b2l2_0000001a",
     "type": "victron-input-system",
     "z": "b2l2_00000000",
     "outputs": 1,
-    "service": "com.victronenergy.system/0",
+    "service": "com.victronenergy.system",
     "path": "/Ac/Grid/L3/Power",
     "serviceObj": {
-      "service": "com.victronenergy.system/0",
-      "name": "Venus system"
+      "service": "com.victronenergy.system",
+      "name": "Venus system",
+      "communityTag": "system"
     },
     "pathObj": {
       "path": "/Ac/Grid/L3/Power",
       "type": "float",
-      "name": "Grid L3 Power (W)"
+      "name": "Grid L3 (W)"
     },
     "initial": "",
     "name": "Grid L3 (Shelly C)",
     "onlyChanges": false,
     "roundValues": "no",
+    "conditionalMode": false,
+    "condition1HysteresisEnabled": false,
+    "condition1HysteresisThreshold": "",
+    "outputTrue": "",
+    "outputFalse": "",
+    "debounce": "",
     "x": 160,
     "y": 150,
     "wires": [
@@ -133,7 +151,9 @@
     "libs": [],
     "x": 420,
     "y": 150,
-    "wires": []
+    "wires": [
+      []
+    ]
   },
   {
     "id": "b2l2_0000000c",
@@ -177,7 +197,9 @@
     "libs": [],
     "x": 420,
     "y": 200,
-    "wires": []
+    "wires": [
+      []
+    ]
   },
   {
     "id": "b2l2_0000000e",
@@ -221,7 +243,9 @@
     "libs": [],
     "x": 420,
     "y": 250,
-    "wires": []
+    "wires": [
+      []
+    ]
   },
   {
     "id": "b2l2_00000018",
@@ -265,7 +289,9 @@
     "libs": [],
     "x": 420,
     "y": 300,
-    "wires": []
+    "wires": [
+      []
+    ]
   },
   {
     "id": "b2l2_00000010",
@@ -309,7 +335,9 @@
     "libs": [],
     "x": 420,
     "y": 350,
-    "wires": []
+    "wires": [
+      []
+    ]
   },
   {
     "id": "b2l2_00000012",
@@ -353,28 +381,37 @@
     "libs": [],
     "x": 420,
     "y": 400,
-    "wires": []
+    "wires": [
+      []
+    ]
   },
   {
     "id": "b2l2_00000014",
     "type": "victron-input-system",
     "z": "b2l2_00000000",
     "outputs": 1,
-    "service": "com.victronenergy.system/0",
+    "service": "com.victronenergy.system",
     "path": "/Dc/Battery/Soc",
     "serviceObj": {
-      "service": "com.victronenergy.system/0",
-      "name": "Venus system"
+      "service": "com.victronenergy.system",
+      "name": "Venus system",
+      "communityTag": "system"
     },
     "pathObj": {
       "path": "/Dc/Battery/Soc",
       "type": "float",
-      "name": "SOC baterie (%)"
+      "name": "Battery State of Charge (%)"
     },
     "initial": "",
     "name": "SOC Hailei (system)",
     "onlyChanges": false,
     "roundValues": "no",
+    "conditionalMode": false,
+    "condition1HysteresisEnabled": false,
+    "condition1HysteresisThreshold": "",
+    "outputTrue": "",
+    "outputFalse": "",
+    "debounce": "",
     "x": 160,
     "y": 450,
     "wires": [
@@ -397,28 +434,37 @@
     "libs": [],
     "x": 420,
     "y": 450,
-    "wires": []
+    "wires": [
+      []
+    ]
   },
   {
     "id": "b2l2_00000016",
     "type": "victron-input-system",
     "z": "b2l2_00000000",
     "outputs": 1,
-    "service": "com.victronenergy.system/0",
+    "service": "com.victronenergy.system",
     "path": "/Dc/Battery/Voltage",
     "serviceObj": {
-      "service": "com.victronenergy.system/0",
-      "name": "Venus system"
+      "service": "com.victronenergy.system",
+      "name": "Venus system",
+      "communityTag": "system"
     },
     "pathObj": {
       "path": "/Dc/Battery/Voltage",
       "type": "float",
-      "name": "Tensiune baterie (V)"
+      "name": "Battery voltage (V)"
     },
     "initial": "",
     "name": "U baterie",
     "onlyChanges": false,
     "roundValues": "no",
+    "conditionalMode": false,
+    "condition1HysteresisEnabled": false,
+    "condition1HysteresisThreshold": "",
+    "outputTrue": "",
+    "outputFalse": "",
+    "debounce": "",
     "x": 160,
     "y": 500,
     "wires": [
@@ -441,7 +487,9 @@
     "libs": [],
     "x": 420,
     "y": 500,
-    "wires": []
+    "wires": [
+      []
+    ]
   },
   {
     "id": "b2l2_0000001e",

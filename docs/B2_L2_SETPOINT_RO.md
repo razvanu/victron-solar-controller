@@ -7,7 +7,7 @@ Flow separat: `flows/B2_Export_Phase_Setpoint_v0_3.json` (tab „B2 v0.3 export 
 - Faze (măsurate): Victron MultiPlus + Fronius pe **L1**, invertor Huawei 4 kW **doar PV** pe **L2**, Huawei 5 kW + LUNA pe **L3** (LUNA va fi controlată de un agregator extern).
 - Ca Victron să nu mai oglindească LUNA (transfer Hailei ↔ LUNA), ESS trebuie pus pe **Multiphase regulation = Individual phase** (`/Settings/CGwacs/Hub4Mode = 2`). Atunci MultiPlus reglează doar L1 și nu mai absoarbe exportul 4 kW de pe L2.
 - B2 readuce acel export în Hailei: `AcPowerSetPoint` (setpoint-ul buclei ESS pentru L1) = **exportul de pe L2 − 50 W**, deci L1 importă cât exportă L2 (net 0 la contorul care face suma vectorială), iar MultiPlus încarcă diferența în baterie.
-- Totul rulează local pe Cerbo: contorul de rețea vine de pe dbus (`com.victronenergy.system/0 /Ac/Grid/L2/Power` și `/Ac/Grid/L3/Power`), fără Home Assistant.
+- Totul rulează local pe Cerbo: contorul de rețea vine de pe dbus (`com.victronenergy.system /Ac/Grid/L2/Power` și `/Ac/Grid/L3/Power`), fără Home Assistant.
 
 ### Faza urmărită: `B2_EXPORT_PHASE`
 

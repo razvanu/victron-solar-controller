@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const root = path.resolve(__dirname, '..');
 const dir = path.join(root, 'flows');
-const files = fs.readdirSync(dir).filter(f => /^Victron_Solar_Forecast_Charge_Controller_v\d+(?:_\d+)*\.json$/.test(f)).sort();
+const files = fs.readdirSync(dir).filter(f => /^(?:Victron_Solar_Forecast_Charge_Controller|B2_L2_Grid_Setpoint|B2_Export_Phase_Setpoint)_v\d+(?:_\d+)*\.json$/.test(f)).sort();
 if (!files.length) { console.error('No controller flow exports found'); process.exit(1); }
 let count = 0;
 for (const file of files) {

@@ -2,6 +2,13 @@
 
 Toate modificarile notabile ale proiectului sunt documentate aici.
 
+## Doar citire pe .60 — 2026-11-26 (branch feature/readonly-60)
+
+- Yellow Grid (Yellow Box) controlează acum Victron-ul (setpoint ESS, DVCC, MaxFeedIn) și oprește Node-RED pe Cerbo. **B2 și controlul DVCC din acest proiect sunt abandonate.**
+- Flow nou `flows/Solar_Controller_DOAR_CITIRE_60.json`: controller v2.8.13 + B2 v0.3 rulează doar citire pe Node-RED-ul din containerul solar-dashboard (.60). Datele vin prin MQTT de la Cerbo, cu publicare doar pe `R/`. Scrierile Victron și helperul de descărcare sunt blocate, iar ENABLE este forțat pe false.
+- Generator `tools/readonly60/build.py`. Adresa Cerbo a devenit placeholderul `CERBO_IP` (scanarea de secrete interzice IP-uri private), iar ieșirea este deterministă (UTF-8, LF). Test `tools/readonly60/verify.js`: regenerează și compară, verifică că nu există noduri Victron, exec sau `W/`, că toate cheile sunt acoperite de abonări, că ENABLE este blocat și că nu există secrete. Testul este inclus în `tests/check_all.sh`, deci rulează și în CI.
+- Ghid: `docs/READONLY_60_RO.md`, cu limitările cunoscute: pragul de vechime de 150 s în emitatori și `source_faults` neconectat după prefixarea id-urilor.
+
 ## B2 v0.3 — 2026-11-25 (branch feature/b2-l2-setpoint-dryrun, DRY RUN)
 
 - Faza urmărită e parametru: `B2_EXPORT_PHASE` în CONFIG (`'L2'` implicit = azi; `'L3'` dacă 4KTL se mută pe L3). Flow-ul citește `/Ac/Grid/L2/Power` și `/Ac/Grid/L3/Power`, controllerul o folosește doar pe cea configurată.

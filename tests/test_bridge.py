@@ -3,11 +3,17 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("bridge", ROOT / "service" / "bridge.py")
-bridge = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(bridge)
+# service/bridge.py runs only on Venus OS (Linux) and imports POSIX-only modules
+# (fcntl, pwd). CI (ubuntu) always runs these tests; a Windows workstation skips them.
+POSIX = importlib.util.find_spec("fcntl") is not None
+bridge = None
+if POSIX:
+    spec = importlib.util.spec_from_file_location("bridge", ROOT / "service" / "bridge.py")
+    bridge = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bridge)
 
 
+@unittest.skipUnless(POSIX, "service/bridge.py needs POSIX fcntl/pwd (Venus OS); runs in CI on Linux")
 class BridgeUnitTests(unittest.TestCase):
     def test_numeric_rejects_non_numeric_telemetry(self):
         for value in (None, True, False, "3.2", [], {}):

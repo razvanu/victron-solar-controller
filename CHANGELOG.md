@@ -2,6 +2,56 @@
 
 Toate modificarile notabile ale proiectului sunt documentate aici.
 
+## Doar citire pe .60 — 2026-11-26 (branch feature/readonly-60)
+
+- Yellow Grid (Yellow Box) controlează acum Victron-ul (setpoint ESS, DVCC, MaxFeedIn) și oprește Node-RED pe Cerbo. **B2 și controlul DVCC din acest proiect sunt abandonate.**
+- Flow nou `flows/Solar_Controller_DOAR_CITIRE_60.json`: controller v2.8.13 + B2 v0.3 rulează doar citire pe Node-RED-ul din containerul solar-dashboard (.60). Datele vin prin MQTT de la Cerbo, cu publicare doar pe `R/`. Scrierile Victron și helperul de descărcare sunt blocate, iar ENABLE este forțat pe false.
+- Generator `tools/readonly60/build.py`. Adresa Cerbo a devenit placeholderul `CERBO_IP` (scanarea de secrete interzice IP-uri private), iar ieșirea este deterministă (UTF-8, LF). Test `tools/readonly60/verify.js`: regenerează și compară, verifică că nu există noduri Victron, exec sau `W/`, că toate cheile sunt acoperite de abonări, că ENABLE este blocat și că nu există secrete. Testul este inclus în `tests/check_all.sh`, deci rulează și în CI.
+- Ghid: `docs/READONLY_60_RO.md`.
+- Corecturi după verificarea codului:
+  - prag de 20 s în emitatori (înainte 150 s);
+  - cereri `R/` pentru toate cheile la 10 s (înainte 60 s; keepalive la 10 s);
+  - id-urile din codul funcțiilor sunt rescrise cu prefixul nou, deci `Store connection faults` completează din nou `source_faults`, iar `Telegram error` recunoaște `getUpdates`.
+  - `verify.js` testează toate trei.
+- „Date Huawei invalide” (`DEGRADED_VICTRON_PV_ONLY`) pe .60: `GET /api/states` nu reîmprospătează `last_reported` pentru valorile neschimbate.
+  - Corecție: lanț nou, după GET: POST `/api/template` (doar randare) pentru `last_reported` real al entităților Huawei/Hailei din CONFIG. Dacă template-ul nu răspunde, lista trece neschimbată.
+  - CONFIG: `entityHaileiSoc` = `sensor.hailei_16kwh_charge`, prin `CONFIG_OVERRIDES` (vechea entitate MQTT nu se mai actualizează).
+  - Entitățile Huawei sunt neschimbate: vin din intrarea directă 5KTL, nu din SmartLogger.
+  - `verify.js`: 1136 de verificări.
+
+## B2 v0.3 — 2026-11-25 (branch feature/b2-l2-setpoint-dryrun, DRY RUN)
+
+- Faza urmărită e parametru: `B2_EXPORT_PHASE` în CONFIG (`'L2'` implicit = azi; `'L3'` dacă 4KTL se mută pe L3). Flow-ul citește `/Ac/Grid/L2/Power` și `/Ac/Grid/L3/Power`, controllerul o folosește doar pe cea configurată.
+- Fază invalidă (`L1`, greșeală de scriere, lipsă) → țintă 0 (`PHASE_INVALID_…`) și ENABLE refuzat.
+- Fișier nou `flows/B2_Export_Phase_Setpoint_v0_3.json` (același tab id `b2l2_00000000` → import cu Replace peste v0.2); `B2_L2_Grid_Setpoint_v0_2.json` șters.
+- Teste: toată suita rulează pentru L2 și L3 (+ export pe cealaltă fază ignorat, faze invalide) – 118 verificări.
+- Identificatorii nodurilor Victron luați din exportul utilizatorului de pe Cerbo (noduri reselectate în editor, victron nodes 1.7.27): `com.victronenergy.system` fără „/0” + `communityTag: system`, câmpurile de condiție goale, numele căilor din editor → nodurile nu mai apar „disconnected” la import. Logica neschimbată; fișierul generat e identic cu exportul (fără nodul `global-config`).
+
+## B2 v0.2 — 2026-11-25
+
+- v0.2: plafonul de încărcare ține cont și de limita DVCC curentă (min(CCL BMS, DVCC, 100 A) × U); DVCC 0 sau necunoscut → 0. Pas nou înainte de LIVE: confirmarea că contorul DEO face suma fazelor.
+
+## B2 v0.1 — 2026-11-24 (prima versiune)
+
+- Flow separat (`flows/B2_L2_Grid_Setpoint_v0_*.json`, acum v0.3): `AcPowerSetPoint` (L1) = exportul de pe L2 − 50 W, pentru ESS „Individual phase” (`Hub4Mode = 2`); date locale de pe dbus, fără Home Assistant.
+- Limite: max 3000 W și min(CCL BMS, DVCC curent, 100 A) × U (DVCC 0 sau necunoscut → 0; −1 = fără limită software); 0 la date L2 > 10 s, BMS deconectat, CCL 0, SOC ≥ 98 %; în LIVE și la `Hub4Mode ≠ 2`.
+- Uzură flash: scriere la schimbare ≥ 100 W, cel mult o dată la 30 s (scădere la 0 / ≥ 500 W: min. 5 s). Simulare 15–24.11: ~20–60 scrieri/zi senină, ~100–160/zi cu nori.
+- DRY RUN implicit (nepersistent): nu scrie nimic, numără scrierile pe care le-ar fi făcut; ENABLE manual, refuzat fără `Hub4Mode = 2`; din LIVE în DRY RUN → 0.
+- Teste: `tests/test_b2_l2_setpoint.js`; `test_flow_syntax.js` include și flow-ul B2.
+- Ghid: `docs/B2_L2_SETPOINT_RO.md`. Generator: `tools/build_b2_flow.py`.
+
+## v2.8.13 — 2026-11-20 (branch fix/winter-surplus-degraded)
+
+- Baseline v2.8.12 exact ca pe Cerbo (`flows/..._v2_8_12.json`, valori locale inlocuite cu placeholderi).
+- Date Huawei valide din `last_reported`/`last_updated` (≤ 120 s, configurabil), fara atributele `huawei_read_*`.
+- Mod degradat ANTI-TRANSFER: 5 min gratie, apoi plafon numai din PV Victron (AC-OUT); alerta Telegram la intrare/iesire.
+- Surplus-first: cat timp exista export si nu e import, plafon 100 A sub limitele BMS/celule/taper; plafon rezidual fara export permanent.
+- Faze configurabile `victronPhase` / `huaweiPhase` (implicit L1 / L3).
+- `activeAfterRestart` optional (implicit false = DRY RUN).
+- `/why` si `/limits`: mod anti-transfer, sursa plafonului, surplus disponibil.
+- Teste: `tests/test_v2_8_13.js` (cod real din flow, simulat); `test_bridge.py` sare numai fara `fcntl` (Windows).
+- Ghid: `docs/V2_8_13_DEPLOY_RO.md`.
+
 ## Unreleased — public-release preparation
 
 - Added public Home Assistant + Solcast setup documentation with exact v2.8.5 entity mappings, units, P10/P50/P90 semantics, freshness limits and REST authentication.

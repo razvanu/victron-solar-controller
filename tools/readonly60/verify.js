@@ -1,0 +1,239 @@
+#!/usr/bin/env node
+// Verifica flow-ul DOAR CITIRE pentru Node-RED pe 192.168.10.60.
+// Utilizare (din radacina repo-ului): node tools/readonly60/verify.js
+// Iesire: "TOATE VERIFICARILE OK" si cod 0, altfel lista erorilor si cod 1.
+'use strict';
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const ROOT = path.resolve(__dirname, '..', '..');
+const OUT = path.join(ROOT, 'flows', 'Solar_Controller_DOAR_CITIRE_60.json');
+const SRC_CTRL = path.join(ROOT, 'flows', 'Victron_Solar_Forecast_Charge_Controller_v2_8_13.json');
+const SRC_B2 = path.join(ROOT, 'flows', 'B2_Export_Phase_Setpoint_v0_3.json');
+const BUILD = path.join(__dirname, 'build.py');
+
+const errors = [];
+let checks = 0;
+function check(cond, msg) { checks++; if (!cond) errors.push(msg); }
+const norm = (s) => s.replace(/\r\n/g, '\n');
+
+const text = fs.readFileSync(OUT, 'utf8');
+const flow = JSON.parse(text);
+const byId = new Map(flow.map((n) => [n.id, n]));
+
+// 1. Generatorul reproduce exact fisierul din repo.
+{
+  const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ro60-')), 'out.json');
+  let r = null;
+  for (const py of ['python3', 'python']) {
+    r = spawnSync(py, [BUILD, SRC_CTRL, SRC_B2, tmp], { encoding: 'utf8' });
+    if (!r.error) break;
+  }
+  check(r && !r.error && r.status === 0, 'build.py nu a rulat: ' + (r && (r.error || r.stderr)));
+  if (r && r.status === 0) {
+    check(norm(fs.readFileSync(tmp, 'utf8')) === norm(text),
+      'flows/Solar_Controller_DOAR_CITIRE_60.json difera de iesirea build.py (regenereaza-l)');
+  }
+}
+
+// 2. Structura: id-uri unice, fire si tab-uri valide.
+check(byId.size === flow.length, 'id-uri duplicate');
+for (const n of flow) {
+  if (n.z !== undefined) check(byId.has(n.z) && byId.get(n.z).type === 'tab', `${n.id}: z inexistent (${n.z})`);
+  for (const w of (n.wires || []).flat()) check(byId.has(w), `${n.id}: fir catre nod inexistent ${w}`);
+  if (n.type === 'group') for (const x of n.nodes || []) check(byId.has(x), `grup ${n.id}: nod inexistent ${x}`);
+  if (/^mqtt (in|out)$/.test(n.type)) check(byId.has(n.broker), `${n.id}: broker inexistent`);
+}
+
+// 3. Nimic care poate scrie pe Victron sau rula comenzi locale.
+for (const n of flow) {
+  check(!/^victron-/.test(n.type), `nod Victron ramas: ${n.id} ${n.type}`);
+  check(n.type !== 'exec', `nod exec ramas: ${n.id}`);
+  check(!['tcp out', 'udp out', 'websocket out', 'modbus-write', 'modbus-flex-write'].includes(n.type),
+    `nod de scriere nepermis: ${n.id} ${n.type}`);
+  if (n.type === 'function') check(!/require\s*\(|child_process|process\.binding/.test(n.func || ''),
+    `${n.id}: functie cu acces la sistem`);
+  if (n.type === 'function' && /^BLOCAT/.test(n.name || '')) {
+    check(n.outputs === 0 && n.wires.length === 0, `${n.id}: nodul BLOCAT are iesiri`);
+  }
+}
+const mqttOut = flow.filter((n) => n.type === 'mqtt out');
+check(mqttOut.length === 1, 'trebuie exact un nod mqtt out (R/ -> Cerbo)');
+for (const o of mqttOut) {
+  check(o.topic === '', 'mqtt out trebuie sa ia topicul din mesaj (filtrat R/)');
+  const feeders = flow.filter((n) => (n.wires || []).flat().includes(o.id));
+  check(feeders.length === 1 && feeders[0].id === 'ro60_ka_fn', 'mqtt out alimentat de alt nod decat keepalive R/');
+}
+for (const n of flow.filter((x) => x.type === 'mqtt in')) {
+  check(/^N\/\+\//.test(n.topic), `${n.id}: abonare in afara N/+/...`);
+}
+
+// 4. Functia keepalive publica numai pe R/<portal>/...
+function runFn(node, msg, env, globals) {
+  const ctx = new Map(); const glob = new Map(Object.entries(globals || {}));
+  const api = { get: (k) => ctx.get(k), set: (k, v) => ctx.set(k, v) };
+  const g = { get: (k) => glob.get(k), set: (k, v) => glob.set(k, v) };
+  const nodeApi = { status() {}, warn() {}, error() {}, log() {} };
+  const fn = new Function('msg', 'node', 'context', 'flow', 'global', 'env', node.func);
+  const res = [];
+  for (let i = 0; i < 3; i++) res.push(fn(msg, nodeApi, api, api, g, { get: (k) => (env || {})[k] }));
+  return { res, glob };
+}
+{
+  const ka = byId.get('ro60_ka_fn');
+  const { res } = runFn(ka, {}, { PORTAL_ID: 'c0ffee000000' });
+  const topics = res.flatMap((r) => (r ? r[0] : [])).map((m) => m.topic);
+  check(topics.length > 0, 'keepalive nu publica nimic');
+  check(topics.every((t) => /^R\/c0ffee000000\/[^/]+/.test(t)), 'keepalive publica in afara R/<portal>/');
+  check(!topics.some((t) => /^W\//.test(t)), 'keepalive publica pe W/');
+  const noPortal = runFn(ka, {}, { PORTAL_ID: 'COMPLETEAZA' }).res;
+  check(noPortal.every((r) => r === null), 'fara PORTAL_ID keepalive trebuie sa nu publice');
+}
+// singura aparitie permisa a lui 'W/' este filtrul de siguranta din keepalive
+check(!/["'`]W\//.test(text.replace("!m.topic.startsWith('W/')", '')), 'textul flow-ului contine un topic W/');
+
+// 5. Emitatorii: fiecare cheie e acoperita de o abonare MQTT si e ceruta prin R/.
+{
+  const subs = flow.filter((n) => n.type === 'mqtt in').map((n) => n.topic.replace(/^N\/\+\//, '').replace(/#$/, ''));
+  const ka = byId.get('ro60_ka_fn').func;
+  const emit = flow.filter((n) => n.type === 'function' && /^MQTT> /.test(n.name || ''));
+  check(emit.length > 0, 'niciun emitator');
+  for (const e of emit) {
+    const key = JSON.parse(e.func.match(/const KEY = ("[^"]+")/)[1]);
+    check(subs.some((s) => key.startsWith(s)), `cheia ${key} nu e acoperita de nicio abonare N/`);
+    check(ka.includes(JSON.stringify(key)), `cheia ${key} nu e ceruta prin R/`);
+  }
+  const ticks = flow.filter((n) => n.type === 'inject' && /tick MQTT/.test(n.name || ''));
+  const wired = new Set(ticks.flatMap((t) => t.wires.flat()));
+  for (const e of emit) check(wired.has(e.id), `emitatorul ${e.id} nu e legat la tick`);
+  // emitator executat pe cache: valoare proaspata -> mesaj; lipsa -> nimic
+  const e0 = emit[0]; const key0 = JSON.parse(e0.func.match(/const KEY = ("[^"]+")/)[1]);
+  const fresh = runFn(e0, {}, {}, { vic_cache: { [key0]: { v: 12.345, t: Date.now() } } }).res[0];
+  check(fresh && fresh.payload !== undefined, 'emitatorul nu emite valoarea proaspata din cache');
+  check(runFn(e0, {}, {}, {}).res[0] === null, 'emitatorul emite fara date in cache');
+  // prag de prospetime 20 s in fiecare emitator
+  for (const e of emit) check(/MAX_AGE_MS = 20000;/.test(e.func), `${e.id}: pragul emitatorului nu e 20 s`);
+  const at = (ageMs) => runFn(e0, {}, {}, { vic_cache: { [key0]: { v: 1, t: Date.now() - ageMs } } }).res[0];
+  check(at(15000) !== null, 'emitatorul refuza o valoare de 15 s');
+  check(at(25000) === null, 'emitatorul trimite o valoare de 25 s');
+  check(at(-5000) === null, 'emitatorul trimite o valoare cu timestamp in viitor');
+}
+
+// 5b. Cererile R/ pentru toate cheile la cel mult 10 s (si valorile constante raman < 20 s).
+{
+  const inj = flow.filter((n) => n.type === 'inject' && (n.wires || []).flat().includes('ro60_ka_fn'));
+  check(inj.length === 1 && Number(inj[0].repeat) > 0 && Number(inj[0].repeat) <= 10 && inj[0].once === true,
+    'keepalive + cereri R/ trebuie sa ruleze la cel mult 10 s, si la pornire');
+  const keys = flow.filter((n) => n.type === 'function' && /^MQTT> /.test(n.name || ''))
+    .map((e) => JSON.parse(e.func.match(/const KEY = ("[^"]+")/)[1]));
+  const { res } = runFn(byId.get('ro60_ka_fn'), {}, { PORTAL_ID: 'c0ffee000000' });
+  res.forEach((r, i) => {
+    const t = new Set((r ? r[0] : []).map((m) => m.topic));
+    check(keys.every((k) => t.has('R/c0ffee000000/' + k)), `rularea ${i + 1} a keepalive nu cere toate cheile`);
+  });
+}
+
+// 5c. Id-urile de noduri scrise in codul functiilor trebuie sa fie cele noi (prefixate).
+{
+  const origIds = new Set([SRC_CTRL, SRC_B2].flatMap((p) => JSON.parse(fs.readFileSync(p, 'utf8')).map((n) => n.id)));
+  for (const n of flow.filter((x) => x.type === 'function')) {
+    for (const m of (n.func || '').matchAll(/(["'])([A-Za-z0-9_.-]+)\1/g)) {
+      if (origIds.has(m[2]) && !byId.has(m[2])) check(false, `${n.id} (${n.name}): id vechi in cod: ${m[2]}`);
+    }
+  }
+  const sf = flow.find((n) => n.type === 'function' && n.name === 'Store connection faults');
+  check(!!sf, 'lipseste Store connection faults');
+  if (sf) {
+    const map = JSON.parse(sf.func.match(/const keyMap=(\{[^}]*\})/)[1]);
+    const st = flow.find((n) => n.type === 'status' && (n.wires || []).flat().includes(sf.id));
+    check(!!st, 'nodul status nu e legat la Store connection faults');
+    for (const id of Object.keys(map)) {
+      const e = byId.get(id);
+      check(!!e && /^MQTT> /.test(e.name || ''), `keyMap: ${id} nu e un emitator`);
+      check(!!st && st.scope.includes(id), `keyMap: ${id} nu e in scope-ul nodului status`);
+    }
+    // statusul rosu al unui emitator marcheaza defectul; cel verde il sterge
+    const id0 = Object.keys(map)[0];
+    const run = (fill, text, faults) => {
+      const store = new Map([['source_faults', faults || {}]]);
+      const api = { get: (k) => store.get(k), set: (k, v) => store.set(k, v) };
+      new Function('msg', 'node', 'context', 'flow', 'global', sf.func)(
+        { status: { fill, text, source: { id: id0 } } }, { status() {} }, api, api, api);
+      return store.get('source_faults');
+    };
+    check(run('red', 'date vechi 25 s')[map[id0]] === true, 'statusul rosu nu marcheaza source_faults');
+    check(!(map[id0] in run('green', '12', { [map[id0]]: true })), 'statusul verde nu sterge source_faults');
+  }
+}
+
+// 5d. last_reported real: GET /api/states -> cerere template -> aplicare -> consumatorii originali.
+{
+  const get = flow.find((n) => n.type === 'http request' && n.name === 'GET /api/states');
+  const req = byId.get('ro60c_lr_req'), http = byId.get('ro60c_lr_http'), app = byId.get('ro60c_lr_apply');
+  check(get && req && http && app, 'lipseste lantul last_reported');
+  if (get && req && http && app) {
+    check(JSON.stringify(get.wires) === JSON.stringify([[req.id]]), 'GET /api/states nu duce la cererea last_reported');
+    check(JSON.stringify(req.wires[0]) === JSON.stringify([http.id]) && JSON.stringify(http.wires) === JSON.stringify([[app.id]]),
+      'lantul cerere -> http -> aplicare e gresit');
+    const targets = app.wires[0];
+    check(targets.length === 2 && JSON.stringify(req.wires[1]) === JSON.stringify(targets) &&
+      targets.every((t) => /Parse Solcast|Measured daily PV/.test(byId.get(t)?.name || '')),
+      'aplicarea/fallback-ul nu duc la consumatorii originali ai GET /api/states');
+    const cfgMock = { entityHuaweiSoc: 'sensor.a', entityHuaweiBatteryPower: 'sensor.b', entityHaileiSoc: 'sensor.c',
+      haUrl: 'http://ha:8123/', haToken: 't' };
+    const run = (fn, msg) => {
+      const store = new Map([['solar_cfg', cfgMock]]);
+      const api = { get: (k) => store.get(k), set: (k, v) => store.set(k, v) };
+      return new Function('msg', 'node', 'context', 'flow', 'global', fn.func)(msg, { status() {} }, api, api, api);
+    };
+    const old = '2026-01-01T00:00:00+00:00', fresh = new Date(Date.now() - 3000).toISOString();
+    const states = () => [{ entity_id: 'sensor.a', state: '10', last_reported: old }, { entity_id: 'sensor.z', state: '1', last_reported: old }];
+    const r1 = run(req, { payload: states(), statusCode: 200 });
+    check(r1[0] && r1[1] === null && r1[0].method === 'POST' && r1[0].url === 'http://ha:8123/api/template',
+      'cererea last_reported nu e POST /api/template');
+    check(r1[0] && /"sensor\.a","sensor\.b","sensor\.c"/.test(r1[0].payload.template), 'template-ul nu cere entitatile din CONFIG');
+    const r2 = run(app, { _ro60States: states(), statusCode: 200, payload: JSON.stringify({ 'sensor.a': fresh }) });
+    check(r2 && r2.payload[0].last_reported === fresh && r2.payload[1].last_reported === old && r2.statusCode === 200,
+      'aplicarea nu actualizeaza doar entitatile cerute');
+    const r3 = run(app, { _ro60States: states(), statusCode: 401, payload: 'unauthorized' });
+    check(r3 && r3.payload[0].last_reported === old && r3.statusCode === 200, 'la esecul template-ului lista nu trece neschimbata');
+    const r4 = run(app, { _ro60States: states(), statusCode: 200, payload: { 'sensor.a': new Date(Date.now() + 60000).toISOString() } });
+    check(r4 && r4.payload[0].last_reported === old, 'last_reported din viitor e acceptat');
+  }
+  const cfg = flow.find((n) => n.type === 'function' && /^CONFIG v2\.8\.13/.test(n.name || ''));
+  check(cfg && /entityHaileiSoc: "sensor\.hailei_16kwh_charge"/.test(cfg.func), 'CONFIG: entityHaileiSoc nu e sensor.hailei_16kwh_charge');
+  check(cfg && /entityHuaweiSoc: "sensor\.batteries_state_of_capacity_2"/.test(cfg.func), 'CONFIG: entityHuaweiSoc schimbat neasteptat');
+}
+
+// 6. Controlul nu poate fi activat.
+for (const n of flow) {
+  if (n.type === 'inject' && /ENABLE/i.test(n.name || '')) check(n.payload === 'false', `${n.id}: inject ENABLE nu e false`);
+  if (n.type === 'function' && n.name === 'Set controller enable') {
+    check(/const enabled=false;/.test(n.func), 'Set controller enable nu e fortat pe false');
+  }
+  if (n.type === 'function' && /const startActive=/.test(n.func || '')) {
+    check(/const startActive=false&&\(/.test(n.func), `${n.id}: startActive nu e fortat pe false`);
+  }
+  if (n.type === 'function') {
+    try { new Function('msg', 'node', 'context', 'flow', 'global', 'env', 'RED', `return (async()=>{${n.func}\n})`); }
+    catch (err) { check(false, `${n.id} (${n.name}): sintaxa: ${err.message}`); }
+  }
+}
+
+// 7. Fara secrete in fisier.
+for (const n of flow.filter((x) => x.type === 'tab')) {
+  for (const v of n.env || []) {
+    if (v.type === 'cred') check(!v.value, `tab ${n.id}: ${v.name} contine o valoare`);
+  }
+}
+check(!/\b\d{8,10}:[A-Za-z0-9_-]{30,}\b/.test(text), 'pare sa contina un token Telegram');
+check(!/eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}/.test(text), 'pare sa contina un token JWT (Home Assistant)');
+
+if (errors.length) {
+  console.error(`ESEC: ${errors.length} din ${checks} verificari`);
+  for (const e of errors) console.error(' - ' + e);
+  process.exit(1);
+}
+console.log(`TOATE VERIFICARILE OK (${checks} verificari, ${flow.length} noduri)`);

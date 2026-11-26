@@ -6,6 +6,9 @@ python3 -m unittest discover -s tests -v
 node tests/test_flow_syntax.js
 node tests/test_charge_guard.js
 node tests/test_force_command.js
+node tests/test_v2_8_13.js
+node tests/test_b2_l2_setpoint.js
+node tools/readonly60/verify.js
 python3 tests/secret_scan.py
 sh -n service/install.sh
 python3 -m py_compile service/bridge.py

@@ -168,6 +168,45 @@ check(!/["'`]W\//.test(text.replace("!m.topic.startsWith('W/')", '')), 'textul f
   }
 }
 
+// 5d. last_reported real: GET /api/states -> cerere template -> aplicare -> consumatorii originali.
+{
+  const get = flow.find((n) => n.type === 'http request' && n.name === 'GET /api/states');
+  const req = byId.get('ro60c_lr_req'), http = byId.get('ro60c_lr_http'), app = byId.get('ro60c_lr_apply');
+  check(get && req && http && app, 'lipseste lantul last_reported');
+  if (get && req && http && app) {
+    check(JSON.stringify(get.wires) === JSON.stringify([[req.id]]), 'GET /api/states nu duce la cererea last_reported');
+    check(JSON.stringify(req.wires[0]) === JSON.stringify([http.id]) && JSON.stringify(http.wires) === JSON.stringify([[app.id]]),
+      'lantul cerere -> http -> aplicare e gresit');
+    const targets = app.wires[0];
+    check(targets.length === 2 && JSON.stringify(req.wires[1]) === JSON.stringify(targets) &&
+      targets.every((t) => /Parse Solcast|Measured daily PV/.test(byId.get(t)?.name || '')),
+      'aplicarea/fallback-ul nu duc la consumatorii originali ai GET /api/states');
+    const cfgMock = { entityHuaweiSoc: 'sensor.a', entityHuaweiBatteryPower: 'sensor.b', entityHaileiSoc: 'sensor.c',
+      haUrl: 'http://ha:8123/', haToken: 't' };
+    const run = (fn, msg) => {
+      const store = new Map([['solar_cfg', cfgMock]]);
+      const api = { get: (k) => store.get(k), set: (k, v) => store.set(k, v) };
+      return new Function('msg', 'node', 'context', 'flow', 'global', fn.func)(msg, { status() {} }, api, api, api);
+    };
+    const old = '2026-01-01T00:00:00+00:00', fresh = new Date(Date.now() - 3000).toISOString();
+    const states = () => [{ entity_id: 'sensor.a', state: '10', last_reported: old }, { entity_id: 'sensor.z', state: '1', last_reported: old }];
+    const r1 = run(req, { payload: states(), statusCode: 200 });
+    check(r1[0] && r1[1] === null && r1[0].method === 'POST' && r1[0].url === 'http://ha:8123/api/template',
+      'cererea last_reported nu e POST /api/template');
+    check(r1[0] && /"sensor\.a","sensor\.b","sensor\.c"/.test(r1[0].payload.template), 'template-ul nu cere entitatile din CONFIG');
+    const r2 = run(app, { _ro60States: states(), statusCode: 200, payload: JSON.stringify({ 'sensor.a': fresh }) });
+    check(r2 && r2.payload[0].last_reported === fresh && r2.payload[1].last_reported === old && r2.statusCode === 200,
+      'aplicarea nu actualizeaza doar entitatile cerute');
+    const r3 = run(app, { _ro60States: states(), statusCode: 401, payload: 'unauthorized' });
+    check(r3 && r3.payload[0].last_reported === old && r3.statusCode === 200, 'la esecul template-ului lista nu trece neschimbata');
+    const r4 = run(app, { _ro60States: states(), statusCode: 200, payload: { 'sensor.a': new Date(Date.now() + 60000).toISOString() } });
+    check(r4 && r4.payload[0].last_reported === old, 'last_reported din viitor e acceptat');
+  }
+  const cfg = flow.find((n) => n.type === 'function' && /^CONFIG v2\.8\.13/.test(n.name || ''));
+  check(cfg && /entityHaileiSoc: "sensor\.hailei_16kwh_charge"/.test(cfg.func), 'CONFIG: entityHaileiSoc nu e sensor.hailei_16kwh_charge');
+  check(cfg && /entityHuaweiSoc: "sensor\.batteries_state_of_capacity_2"/.test(cfg.func), 'CONFIG: entityHuaweiSoc schimbat neasteptat');
+}
+
 // 6. Controlul nu poate fi activat.
 for (const n of flow) {
   if (n.type === 'inject' && /ENABLE/i.test(n.name || '')) check(n.payload === 'false', `${n.id}: inject ENABLE nu e false`);

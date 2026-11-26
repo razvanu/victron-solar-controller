@@ -48,6 +48,15 @@ return [{payload: JSON.stringify({ok:false, error:'READONLY_NO_HELPER'})}, null,
 
 QUOTED = re.compile(r"([\"'])([A-Za-z0-9_.-]+)\1")
 
+# Entitati HA schimbate fata de CONFIG-ul de pe Cerbo (verificat in HA, 26.11.2026):
+# - sensor.hailei_battery_1_state_of_charge (MQTT) nu se mai actualizeaza (~14 h);
+#   SOC-ul BMS Hailei vine acum prin integrarea victron_gx: sensor.hailei_16kwh_charge.
+# Entitatile Huawei raman: sensor.batteries_state_of_capacity_2 / sensor.battery_2_charge_discharge_power
+# vin din intrarea directa SUN2000-5KTL-L1 (SmartLogger dezactivat nu le afecteaza).
+CONFIG_OVERRIDES = [
+    ('entityHaileiSoc: "sensor.hailei_battery_1_state_of_charge"', 'entityHaileiSoc: "sensor.hailei_16kwh_charge"'),
+]
+
 def transform(nodes, prefix, tab_label, tab_env, keys):
     idmap = {n["id"]: prefix + n["id"] for n in nodes}
     tick_id = prefix + "tick2s"
@@ -125,6 +134,10 @@ def transform(nodes, prefix, tab_label, tab_env, keys):
             # id-urile de noduri scrise in cod (ex. msg.status.source.id in 'Store connection
             # faults', msg.error.source.id in 'Telegram error') primesc acelasi prefix ca nodurile
             f = QUOTED.sub(lambda m: m.group(1) + idmap.get(m.group(2), m.group(2)) + m.group(1), f)
+            if (n.get("name") or "").startswith("CONFIG v2.8.13"):
+                for old, new in CONFIG_OVERRIDES:
+                    assert f.count(old) == 1, "CONFIG_OVERRIDES: nu gasesc " + old
+                    f = f.replace(old, new)
             n["func"] = f
             if "const startActive=" in f:
                 f = f.replace("const startActive=", "const startActive=false&&(")
@@ -152,6 +165,67 @@ env_ctrl = [
 ]
 out_ctrl, s1 = transform(ctrl, "ro60c_", "Solar Controller v2.8.13 - DOAR CITIRE (.60)", env_ctrl, keys)
 out_b2, s2 = transform(b2, "ro60b_", "B2 v0.3 - DOAR CITIRE / calcul (.60)", [], keys)
+
+# ---- last_reported real pentru Huawei/Hailei --------------------------------------------------
+# GET /api/states intoarce last_reported = last_changed cand valoarea nu se schimba (HA nu
+# reimprospateaza starea serializata la un "state reported"). Un SOC Huawei constant (ex. 10 %
+# noaptea) parea astfel mai vechi de huaweiDataMaxAgeMs -> DEGRADED_VICTRON_PV_ONLY, desi
+# integrarea citeste la ~30 s. Dupa GET /api/states cerem prin POST /api/template (doar
+# randare, nu scrie nimic) last_reported real pentru entitatile din CONFIG si il punem in lista.
+# Daca cererea esueaza (ex. token fara drept de admin), lista originala merge mai departe neschimbata.
+LR_REQ_FUNC = r"""// DOAR CITIRE: cere last_reported real (POST /api/template = randare, nu scrie nimic)
+const cfg = flow.get('solar_cfg');
+if (!cfg || !Array.isArray(msg.payload) || Number(msg.statusCode || 200) !== 200) return [null, msg];
+const ids = [...new Set([cfg.entityHuaweiSoc, cfg.entityHuaweiBatteryPower, cfg.entityHaileiSoc]
+    .filter(x => typeof x === 'string' && /^[a-z_]+\.[a-z0-9_]+$/.test(x)))];
+if (!ids.length) return [null, msg];
+msg._ro60States = msg.payload;
+msg.method = 'POST';
+msg.url = cfg.haUrl.replace(/\/$/, '') + '/api/template';
+msg.payload = {template: '{% set ns = namespace(o={}) %}{% for e in ' + JSON.stringify(ids) +
+    ' %}{% if states[e] %}{% set ns.o = dict(ns.o, **{e: states[e].last_reported.isoformat()}) %}{% endif %}{% endfor %}{{ ns.o | to_json }}'};
+msg.headers = {'Authorization': 'Bearer ' + cfg.haToken, 'Content-Type': 'application/json'};
+msg.requestTimeout = 10000;
+return [msg, null];"""
+
+LR_APPLY_FUNC = r"""// DOAR CITIRE: aplica last_reported real peste lista din GET /api/states
+const states = msg._ro60States; delete msg._ro60States;
+if (!Array.isArray(states)) return null;
+let lr = null;
+if (Number(msg.statusCode) === 200) {
+    try { lr = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : msg.payload; } catch (e) { lr = null; }
+}
+let n = 0;
+if (lr && typeof lr === 'object' && !Array.isArray(lr)) {
+    const now = Date.now();
+    for (const s of states) {
+        const t = s && typeof lr[s.entity_id] === 'string' ? Date.parse(lr[s.entity_id]) : NaN;
+        const old = Date.parse((s && (s.last_reported || s.last_updated)) || '');
+        if (Number.isFinite(t) && t <= now + 2000 && (!Number.isFinite(old) || t > old)) { s.last_reported = lr[s.entity_id]; n++; }
+    }
+    node.status({fill: 'green', shape: 'dot', text: 'last_reported real: ' + n + ' entitati ' + new Date().toLocaleTimeString()});
+} else {
+    node.status({fill: 'yellow', shape: 'ring', text: 'template HA indisponibil (' + msg.statusCode + '): last_reported din REST'});
+}
+msg.payload = states; msg.statusCode = 200;
+return msg;"""
+
+_get = next(n for n in out_ctrl if n.get("type") == "http request" and n.get("name") == "GET /api/states")
+_targets = _get["wires"][0]
+_lr_ids = ("ro60c_lr_req", "ro60c_lr_http", "ro60c_lr_apply")
+_get["wires"] = [[_lr_ids[0]]]
+out_ctrl += [
+    {"id": _lr_ids[0], "type": "function", "z": _get["z"], "name": "ro60: cerere last_reported (POST /api/template)",
+     "func": LR_REQ_FUNC, "outputs": 2, "timeout": 0, "noerr": 0, "initialize": "", "finalize": "", "libs": [],
+     "x": _get.get("x", 650) + 60, "y": _get.get("y", 220) + 60, "wires": [[_lr_ids[1]], _targets]},
+    {"id": _lr_ids[1], "type": "http request", "z": _get["z"], "name": "POST /api/template (doar randare)",
+     "method": "use", "ret": "txt", "paytoqs": "ignore", "url": "", "tls": "", "persist": False, "proxy": "",
+     "insecureHTTPParser": False, "authType": "", "senderr": False, "headers": [],
+     "x": _get.get("x", 650) + 60, "y": _get.get("y", 220) + 110, "wires": [[_lr_ids[2]]]},
+    {"id": _lr_ids[2], "type": "function", "z": _get["z"], "name": "ro60: aplica last_reported real",
+     "func": LR_APPLY_FUNC, "outputs": 1, "timeout": 0, "noerr": 0, "initialize": "", "finalize": "", "libs": [],
+     "x": _get.get("x", 650) + 60, "y": _get.get("y", 220) + 160, "wires": [_targets]},
+]
 
 KEYS = sorted(keys)
 BRIDGE_TAB = "ro60_bridge_tab"

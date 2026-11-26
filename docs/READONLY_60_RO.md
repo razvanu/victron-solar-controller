@@ -75,6 +75,17 @@ node tools/readonly60/verify.js
 
 Șterge sau dezactivează cele trei tab-uri și nodul broker `ro60`, apoi Deploy. Cerbo nu se schimbă în niciun fel, pentru că bridge-ul doar citește.
 
+## Date Huawei/Hailei din HA (corectat 2026-11-26)
+
+- **Cauza „Date Huawei invalide” (`DEGRADED_VICTRON_PV_ONLY`).** Entitățile Huawei din CONFIG există și se actualizează: `sensor.batteries_state_of_capacity_2` și `sensor.battery_2_charge_discharge_power` vin din intrarea directă SUN2000-5KTL-L1, deci dezactivarea SmartLogger nu le-a afectat. Problema e alta: `GET /api/states` întoarce `last_reported` egal cu ultima *schimbare*. Un SOC constant (de exemplu 10 % noaptea) pare astfel mai vechi de `huaweiDataMaxAgeMs` (120 s), deși integrarea citește la ~30 s.
+- **Corecția (doar în varianta .60):**
+  - după `GET /api/states`, flow-ul cere prin `POST /api/template` (doar randare, nu scrie nimic) `last_reported` real pentru `entityHuaweiSoc`, `entityHuaweiBatteryPower` și `entityHaileiSoc`;
+  - valoarea primită o înlocuiește pe cea din listă, doar dacă e mai nouă și nu e din viitor;
+  - dacă cererea eșuează, lista originală merge mai departe neschimbată (statusul nodului devine galben).
+  - `/api/template` cere de obicei un token de **administrator** în HA. Cu un token fără drepturi de administrator rămâne comportamentul vechi.
+- **Hailei:** `sensor.hailei_battery_1_state_of_charge` (MQTT) nu se mai actualizează din 26.11 dimineața. CONFIG folosește acum `sensor.hailei_16kwh_charge` (SOC-ul BMS prin integrarea victron_gx). Înlocuirea se face în `CONFIG_OVERRIDES` din `build.py`, iar generatorul se oprește cu eroare dacă textul original lipsește.
+- **Fără schimbare:** Huawei (entitățile de mai sus), PV zilnic (`inverter_daily_yield` = 5KTL, `inverter_daily_yield_2` = 4KTL, Primo) și energiile Shelly (`shelly_pro_3em_id_40_*`). `sensor.huawei_putere_activa_totala` nu este folosit de controller.
+
 ## Prospețime și defecte (corectat 2026-11-26)
 
 - **Pragul de 20 s.** Cerbo publică `N/` doar la schimbare. Ca valorile constante (setări, CVL, `Connected`) să nu expire, bridge-ul cere toate cheile prin `R/` la fiecare 10 s. Emitatorul trimite numai valori cu vechime de cel mult 20 s, iar nodul `store …` pune `_ts` la primire. Vechimea reală a unei valori acceptate este deci de cel mult ~20 s plus ~2 s (tick-ul emitatorului) față de ultima confirmare de la Cerbo. Dacă MQTT cade, după 20 s emitatorii devin roșii și nu mai trimit nimic, iar controllerul vede datele expirate.

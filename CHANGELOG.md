@@ -13,6 +13,11 @@ Toate modificarile notabile ale proiectului sunt documentate aici.
   - cereri `R/` pentru toate cheile la 10 s (înainte 60 s; keepalive la 10 s);
   - id-urile din codul funcțiilor sunt rescrise cu prefixul nou, deci `Store connection faults` completează din nou `source_faults`, iar `Telegram error` recunoaște `getUpdates`.
   - `verify.js` testează toate trei.
+- „Date Huawei invalide” (`DEGRADED_VICTRON_PV_ONLY`) pe .60: `GET /api/states` nu reîmprospătează `last_reported` pentru valorile neschimbate.
+  - Corecție: lanț nou, după GET: POST `/api/template` (doar randare) pentru `last_reported` real al entităților Huawei/Hailei din CONFIG. Dacă template-ul nu răspunde, lista trece neschimbată.
+  - CONFIG: `entityHaileiSoc` = `sensor.hailei_16kwh_charge`, prin `CONFIG_OVERRIDES` (vechea entitate MQTT nu se mai actualizează).
+  - Entitățile Huawei sunt neschimbate: vin din intrarea directă 5KTL, nu din SmartLogger.
+  - `verify.js`: 1136 de verificări.
 
 ## B2 v0.3 — 2026-11-25 (branch feature/b2-l2-setpoint-dryrun, DRY RUN)
 

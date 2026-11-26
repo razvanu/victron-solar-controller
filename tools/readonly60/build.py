@@ -22,11 +22,14 @@ def svc_key(service, path):
     return s + path
 
 EMIT_FUNC = r"""// DOAR CITIRE: emitator din cache-ul MQTT (inlocuieste nodul Victron dbus)
-const KEY = %(key)s, ROUND = %(round)s, NAME = %(name)s;
+// Valorile constante sunt reimprospatate prin cereri R/ la 10 s (tab-ul bridge), deci o
+// valoare mai veche de MAX_AGE_MS nu mai este trimisa: nodul 'store' isi pastreaza _ts
+// vechi, controllerul o vede expirata, iar statusul rosu marcheaza source_faults.
+const KEY = %(key)s, ROUND = %(round)s, NAME = %(name)s, MAX_AGE_MS = 20000;
 const c = (global.get('vic_cache') || {})[KEY];
 if (!c) { node.status({fill:'grey', shape:'ring', text:'astept date MQTT'}); return null; }
 const age = Date.now() - c.t;
-if (age > 150000) { node.status({fill:'red', shape:'ring', text:'date vechi ' + Math.round(age/1000) + ' s'}); return null; }
+if (!(age >= 0 && age <= MAX_AGE_MS)) { node.status({fill:'red', shape:'ring', text:'date vechi ' + Math.round(age/1000) + ' s'}); return null; }
 let v = c.v;
 if (typeof v === 'number' && ROUND !== null) v = Number(v.toFixed(ROUND));
 node.status({fill:'green', shape:'dot', text:String(v)});
@@ -42,6 +45,8 @@ return null;"""
 EXEC_FUNC = r"""// DOAR CITIRE: helperul de descarcare fortata ruleaza doar pe Cerbo; aici nu exista.
 node.status({fill:'grey', shape:'ring', text:'helper indisponibil (doar citire)'});
 return [{payload: JSON.stringify({ok:false, error:'READONLY_NO_HELPER'})}, null, null];"""
+
+QUOTED = re.compile(r"([\"'])([A-Za-z0-9_.-]+)\1")
 
 def transform(nodes, prefix, tab_label, tab_env, keys):
     idmap = {n["id"]: prefix + n["id"] for n in nodes}
@@ -117,6 +122,10 @@ def transform(nodes, prefix, tab_label, tab_env, keys):
             stats["enable"] += 1
         elif t == "function":
             f = n.get("func", "")
+            # id-urile de noduri scrise in cod (ex. msg.status.source.id in 'Store connection
+            # faults', msg.error.source.id in 'Telegram error') primesc acelasi prefix ca nodurile
+            f = QUOTED.sub(lambda m: m.group(1) + idmap.get(m.group(2), m.group(2)) + m.group(1), f)
+            n["func"] = f
             if "const startActive=" in f:
                 f = f.replace("const startActive=", "const startActive=false&&(")
                 f = f.replace("cfg.activeAfterRestart===true;", "cfg.activeAfterRestart===true);", 1)
@@ -151,11 +160,10 @@ KA_FUNC = r"""// Publica DOAR pe R/<portal>/... : keepalive + cereri de citire. 
 const id = env.get('PORTAL_ID') && env.get('PORTAL_ID') !== 'COMPLETEAZA' ? env.get('PORTAL_ID') : global.get('vic_portal');
 if (!id) { node.status({fill:'red', shape:'ring', text:'PORTAL_ID lipsa (proprietatile tab-ului)'}); return null; }
 const KEYS = %(keys)s;
-const n = (context.get('n') || 0) + 1; context.set('n', n);
+// la fiecare tick (10 s): keepalive + cerere pentru toate valorile, ca si cele constante
+// (publicate de Cerbo doar la schimbare) sa ramana sub pragul de 20 s al emitatorilor
 const msgs = [{topic: 'R/' + id + '/keepalive', payload: JSON.stringify({'keepalive-options': ['suppress-republish']})}];
-if (n === 1 || n %% 2 === 0) {               // la pornire si la fiecare 60 s: cere valorile curente
-    for (const k of KEYS) msgs.push({topic: 'R/' + id + '/' + k, payload: ''});
-}
+for (const k of KEYS) msgs.push({topic: 'R/' + id + '/' + k, payload: ''});
 const safe = msgs.filter(m => /^R\/[^/]+\//.test(m.topic) && !m.topic.startsWith('W/'));
 node.status({fill:'green', shape:'dot', text:'keepalive ' + new Date().toLocaleTimeString() + (safe.length > 1 ? ' + ' + (safe.length-1) + ' citiri' : '')});
 return [safe];"""
@@ -177,7 +185,7 @@ return null;"""
 bridge = [
     {"id": BRIDGE_TAB, "type": "tab", "label": "Victron MQTT bridge (doar citire)", "disabled": False,
      "info": "Citeste Cerbo GX (CERBO_IP: completeaza in nodul broker) prin MQTT si pune valorile in global 'vic_cache'.\n"
-             "Publica DOAR pe R/<portal>/... (keepalive + cereri de citire). Nu exista niciun W/.\n"
+             "Publica DOAR pe R/<portal>/... (keepalive + cereri de citire la 10 s). Nu exista niciun W/.\n"
              "PORTAL_ID: Cerbo > Settings > VRM online portal > VRM Portal ID.",
      "env": [{"name": "PORTAL_ID", "value": "COMPLETEAZA", "type": "str"}]},
     {"id": BROKER, "type": "mqtt-broker", "name": "Cerbo GX MQTT (ro60) - CERBO_IP", "broker": "CERBO_IP",
@@ -186,8 +194,8 @@ bridge = [
      "birthTopic": "", "closeTopic": "", "willTopic": ""},
     {"id": "ro60_c1", "type": "comment", "z": BRIDGE_TAB,
      "name": "DOAR CITIRE - nu adauga noduri mqtt out pe W/...", "info": "", "x": 230, "y": 40, "wires": []},
-    {"id": "ro60_ka_inj", "type": "inject", "z": BRIDGE_TAB, "name": "keepalive + citiri / 30 s", "props": [],
-     "repeat": "30", "crontab": "", "once": True, "onceDelay": "2", "topic": "", "x": 160, "y": 100,
+    {"id": "ro60_ka_inj", "type": "inject", "z": BRIDGE_TAB, "name": "keepalive + citiri / 10 s", "props": [],
+     "repeat": "10", "crontab": "", "once": True, "onceDelay": "2", "topic": "", "x": 160, "y": 100,
      "wires": [["ro60_ka_fn"]]},
     {"id": "ro60_ka_fn", "type": "function", "z": BRIDGE_TAB, "name": "keepalive + cereri R/ (fara W/)",
      "func": KA_FUNC % {"keys": json.dumps(KEYS)}, "outputs": 1, "timeout": 0, "noerr": 0,

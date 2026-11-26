@@ -10,13 +10,14 @@ Yellow Grid (Yellow Box) controlează acum Victron-ul: setpoint ESS, DVCC/`MaxCh
 
 | Tab | Rol |
 |---|---|
-| `Victron MQTT bridge (doar citire)` | Se abonează la `N/+/system/0/#`, `N/+/battery/512/#` și `N/+/settings/0/Settings/#` pe Cerbo și pune valorile în `global.vic_cache`. Publică doar pe `R/<portal>/…`: un keepalive la 30 s și cereri de citire pentru cele 27 de chei, la pornire și apoi la 60 s. |
+| `Victron MQTT bridge (doar citire)` | Se abonează la `N/+/system/0/#`, `N/+/battery/512/#` și `N/+/settings/0/Settings/#` pe Cerbo și pune valorile în `global.vic_cache`. Publică doar pe `R/<portal>/…`: la pornire și apoi la fiecare 10 s, un keepalive și cereri de citire pentru toate cele 27 de chei. |
 | `Solar Controller v2.8.13 - DOAR CITIRE (.60)` | Controllerul neschimbat, cu aceste înlocuiri: |
 | `B2 v0.3 - DOAR CITIRE / calcul (.60)` | B2 neschimbat, cu aceleași înlocuiri. |
 
 Înlocuirile:
 
-- fiecare nod `victron-input-*` devine o funcție `MQTT> …` cu același id și aceleași fire, care emite valoarea din cache la fiecare 2 s;
+- fiecare nod `victron-input-*` devine o funcție `MQTT> …` cu același id și aceleași fire. La fiecare 2 s, funcția emite valoarea din cache doar dacă aceasta are cel mult **20 s**. O valoare mai veche nu mai este trimisă: emitatorul devine roșu, iar `source_faults` o marchează;
+- id-urile de noduri scrise în codul funcțiilor (`Store connection faults`, `Telegram error`) sunt rescrise cu prefixul nou;
 - fiecare nod `victron-output-*` devine o funcție `BLOCAT (doar citire)` fără ieșiri: ultima scriere refuzată ajunge în `flow.blocked_write_last`;
 - nodul `exec` (helperul de descărcare `/data/solar-discharge/bridge.py`) devine o funcție care răspunde `READONLY_NO_HELPER`;
 - injecturile ENABLE trimit `false`, `Set controller enable` este forțat pe `false`, iar `activeAfterRestart` este ignorat. Controllerul rămâne în DRY RUN.
@@ -74,8 +75,9 @@ node tools/readonly60/verify.js
 
 Șterge sau dezactivează cele trei tab-uri și nodul broker `ro60`, apoi Deploy. Cerbo nu se schimbă în niciun fel, pentru că bridge-ul doar citește.
 
-## Limitări cunoscute (din verificarea codului, 2026-11-26)
+## Prospețime și defecte (corectat 2026-11-26)
 
-1. **Prospețimea datelor.** Emitatorii retrimit la fiecare 2 s valoarea din cache cât timp aceasta are sub **150 s**. Nodurile `store …` pun `_ts = Date.now()` la fiecare mesaj. Pragul de 20 s din controller verifică deci doar că emitatorul rulează: o valoare veche de până la ~150 s trece drept proaspătă. Cerbo publică `N/` doar la schimbare, iar valorile constante sunt reîmprospătate prin `R/` la 60 s. Corecția propusă: prag de 20 s în emitator și cereri `R/` la cel mult 10 s.
-2. **Defectele de conexiune nu se mai înregistrează.** `Store connection faults` caută id-urile originale (`v212_…`), dar nodurile au acum prefixul `ro60c_`. `flow.source_faults` rămâne gol. Pragul de vechime (punctul 1) rămâne singura protecție.
-3. Controllerul nu poate fi activat pe .60. Toate scrierile și helperul de descărcare sunt blocate.
+- **Pragul de 20 s.** Cerbo publică `N/` doar la schimbare. Ca valorile constante (setări, CVL, `Connected`) să nu expire, bridge-ul cere toate cheile prin `R/` la fiecare 10 s. Emitatorul trimite numai valori cu vechime de cel mult 20 s, iar nodul `store …` pune `_ts` la primire. Vechimea reală a unei valori acceptate este deci de cel mult ~20 s plus ~2 s (tick-ul emitatorului) față de ultima confirmare de la Cerbo. Dacă MQTT cade, după 20 s emitatorii devin roșii și nu mai trimit nimic, iar controllerul vede datele expirate.
+- **`source_faults`.** Statusul roșu al unui emitator („date vechi”) marchează cheia ca defectă, iar cel verde o șterge, ca la nodurile Victron de pe Cerbo.
+- **Telegram.** Erorile de transport la `getUpdates` sunt recunoscute din nou după id. Altfel, `telegram_inflight` nu s-ar mai elibera.
+- Controllerul nu poate fi activat pe .60. Toate scrierile și helperul de descărcare sunt blocate.

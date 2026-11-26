@@ -113,6 +113,59 @@ check(!/["'`]W\//.test(text.replace("!m.topic.startsWith('W/')", '')), 'textul f
   const fresh = runFn(e0, {}, {}, { vic_cache: { [key0]: { v: 12.345, t: Date.now() } } }).res[0];
   check(fresh && fresh.payload !== undefined, 'emitatorul nu emite valoarea proaspata din cache');
   check(runFn(e0, {}, {}, {}).res[0] === null, 'emitatorul emite fara date in cache');
+  // prag de prospetime 20 s in fiecare emitator
+  for (const e of emit) check(/MAX_AGE_MS = 20000;/.test(e.func), `${e.id}: pragul emitatorului nu e 20 s`);
+  const at = (ageMs) => runFn(e0, {}, {}, { vic_cache: { [key0]: { v: 1, t: Date.now() - ageMs } } }).res[0];
+  check(at(15000) !== null, 'emitatorul refuza o valoare de 15 s');
+  check(at(25000) === null, 'emitatorul trimite o valoare de 25 s');
+  check(at(-5000) === null, 'emitatorul trimite o valoare cu timestamp in viitor');
+}
+
+// 5b. Cererile R/ pentru toate cheile la cel mult 10 s (si valorile constante raman < 20 s).
+{
+  const inj = flow.filter((n) => n.type === 'inject' && (n.wires || []).flat().includes('ro60_ka_fn'));
+  check(inj.length === 1 && Number(inj[0].repeat) > 0 && Number(inj[0].repeat) <= 10 && inj[0].once === true,
+    'keepalive + cereri R/ trebuie sa ruleze la cel mult 10 s, si la pornire');
+  const keys = flow.filter((n) => n.type === 'function' && /^MQTT> /.test(n.name || ''))
+    .map((e) => JSON.parse(e.func.match(/const KEY = ("[^"]+")/)[1]));
+  const { res } = runFn(byId.get('ro60_ka_fn'), {}, { PORTAL_ID: 'c0ffee000000' });
+  res.forEach((r, i) => {
+    const t = new Set((r ? r[0] : []).map((m) => m.topic));
+    check(keys.every((k) => t.has('R/c0ffee000000/' + k)), `rularea ${i + 1} a keepalive nu cere toate cheile`);
+  });
+}
+
+// 5c. Id-urile de noduri scrise in codul functiilor trebuie sa fie cele noi (prefixate).
+{
+  const origIds = new Set([SRC_CTRL, SRC_B2].flatMap((p) => JSON.parse(fs.readFileSync(p, 'utf8')).map((n) => n.id)));
+  for (const n of flow.filter((x) => x.type === 'function')) {
+    for (const m of (n.func || '').matchAll(/(["'])([A-Za-z0-9_.-]+)\1/g)) {
+      if (origIds.has(m[2]) && !byId.has(m[2])) check(false, `${n.id} (${n.name}): id vechi in cod: ${m[2]}`);
+    }
+  }
+  const sf = flow.find((n) => n.type === 'function' && n.name === 'Store connection faults');
+  check(!!sf, 'lipseste Store connection faults');
+  if (sf) {
+    const map = JSON.parse(sf.func.match(/const keyMap=(\{[^}]*\})/)[1]);
+    const st = flow.find((n) => n.type === 'status' && (n.wires || []).flat().includes(sf.id));
+    check(!!st, 'nodul status nu e legat la Store connection faults');
+    for (const id of Object.keys(map)) {
+      const e = byId.get(id);
+      check(!!e && /^MQTT> /.test(e.name || ''), `keyMap: ${id} nu e un emitator`);
+      check(!!st && st.scope.includes(id), `keyMap: ${id} nu e in scope-ul nodului status`);
+    }
+    // statusul rosu al unui emitator marcheaza defectul; cel verde il sterge
+    const id0 = Object.keys(map)[0];
+    const run = (fill, text, faults) => {
+      const store = new Map([['source_faults', faults || {}]]);
+      const api = { get: (k) => store.get(k), set: (k, v) => store.set(k, v) };
+      new Function('msg', 'node', 'context', 'flow', 'global', sf.func)(
+        { status: { fill, text, source: { id: id0 } } }, { status() {} }, api, api, api);
+      return store.get('source_faults');
+    };
+    check(run('red', 'date vechi 25 s')[map[id0]] === true, 'statusul rosu nu marcheaza source_faults');
+    check(!(map[id0] in run('green', '12', { [map[id0]]: true })), 'statusul verde nu sterge source_faults');
+  }
 }
 
 // 6. Controlul nu poate fi activat.
